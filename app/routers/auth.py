@@ -20,7 +20,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Usuario inactivo")
-    token = create_access_token({"sub": user.id, "role": user.role})
+    token = create_access_token({"sub": str(user.id), "role": user.role})
     return Token(
         access_token=token,
         user=UserOut.model_validate(user),

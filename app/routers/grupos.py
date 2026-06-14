@@ -47,7 +47,7 @@ def obtener_grupo(
     return g
 
 
-@router.post("/", response_model=GrupoOut, status_code=201)
+@router.post("", response_model=GrupoOut, status_code=201)
 def crear_grupo(
     payload: GrupoCreate,
     db: Session = Depends(get_db),

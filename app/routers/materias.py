@@ -7,10 +7,12 @@ from app.models.materia import Materia
 from app.models.grupo import Grupo
 from app.schemas.materia import MateriaCreate, MateriaOut, MateriaConGrupos
 
-router = APIRouter(prefix="/api/materias", tags=["materias"])
+# Se desactiva redirect_slashes para evitar que las peticiones con/sin diagonal 
+# pierdan el token JWT en el camino.
+router = APIRouter(prefix="/api/materias", tags=["materias"], redirect_slashes=False)
 
 
-@router.get("/", response_model=list[MateriaOut])
+@router.get("", response_model=list[MateriaOut])
 def listar_materias(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -35,7 +37,7 @@ def obtener_materia(
     return m
 
 
-@router.post("/", response_model=MateriaOut, status_code=201)
+@router.post("", response_model=MateriaOut, status_code=201)
 def crear_materia(
     payload: MateriaCreate,
     db: Session = Depends(get_db),
@@ -43,8 +45,8 @@ def crear_materia(
 ):
     if db.query(Materia).filter(Materia.clave == payload.clave).first():
         raise HTTPException(400, "La clave ya existe")
-    profesor_id = user.id if user.role == "profesor" else user.id
-    m = Materia(**payload.model_dump(), profesor_id=profesor_id)
+    
+    m = Materia(**payload.model_dump(), profesor_id=user.id)
     db.add(m)
     db.commit()
     db.refresh(m)

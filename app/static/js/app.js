@@ -8,30 +8,44 @@ const state = {
     ultimoScan: { codigo: '', tiempo: 0 },
 };
 
-// ============ API HELPER ============
+// ============ API HELPER (Con lectura de error del backend) ============
 async function api(path, options = {}) {
-    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-    
-    // 🚨 CORRECCIÓN: Si no está en memoria (state), lo rescatamos del localStorage
-    const tokenActivo = state.token || localStorage.getItem('token');
-    
-    if (tokenActivo) {
-        headers['Authorization'] = `Bearer ${tokenActivo}`;
+    if (path.endsWith('/') && path.length > 1) {
+        path = path.slice(0, -1);
     }
     
+    const currentToken = state.token || localStorage.getItem('token');
+    const headers = { 
+        'Content-Type': 'application/json', 
+        ...(options.headers || {}) 
+    };
+    
+    if (currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+
     const res = await fetch(path, { ...options, headers });
     
     if (res.status === 401) { 
+        let errorDetail = "No autenticado";
+        try {
+            // Intentamos leer el mensaje de error que envía FastAPI
+            const errorData = await res.json();
+            errorDetail = errorData.detail || errorDetail;
+        } catch (e) {}
+        
+        console.error("❌ El servidor rechazó la petición. Detalle:", errorDetail);
         logout(); 
-        throw new Error('Sesión expirada'); 
+        throw new Error(errorDetail); 
     }
     
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Error');
+        if (!res.ok) throw new Error(data.detail || 'Error en la solicitud');
         return data;
     }
+    
     if (!res.ok) throw new Error('Error en la solicitud');
     return res;
 }
@@ -65,21 +79,28 @@ document.getElementById('form-login').addEventListener('submit', async e => {
     const password = document.getElementById('login-password').value;
     const errEl = document.getElementById('login-error');
     errEl.classList.add('oculto');
+    
     try {
+        console.log("🔄 Intentando iniciar sesión...");
         const data = await api('/api/auth/login', {
             method: 'POST',
             body: JSON.stringify({ email, password }),
         });
         
+        console.log("✅ Login exitoso. Token recibido del servidor.");
+        
         state.token = data.access_token;
         state.user = data.user;
+        
+        // Guardar en localStorage
         localStorage.setItem('token', state.token);
         localStorage.setItem('user', JSON.stringify(state.user));
         
-        // 🚨 LA CLAVE: Le pasamos el token en mano para el primer ciclo de carga
-        iniciarApp(data.access_token); 
+        console.log("💾 Token guardado en localStorage:", localStorage.getItem('token') ? "SÍ" : "NO");
         
+        iniciarApp();
     } catch (err) {
+        console.error("❌ Error en login:", err);
         errEl.textContent = err.message || 'Credenciales inválidas';
         errEl.classList.remove('oculto');
     }
@@ -156,9 +177,10 @@ function iniciarApp(tokenDirecto = null) {
 }
 
 // ============ MATERIAS ============
+// 1. Cargar selects (SIN barra final)
 async function cargarMateriasSelects() {
     try {
-        state.materias = await api('/api/materias/');
+        state.materias = await api('/api/materias'); // <-- Sin barra
         const selects = ['sel-materia-activa', 'sel-materia-grupos', 'sel-materia-qr'];
         selects.forEach(id => {
             const sel = document.getElementById(id);
@@ -166,7 +188,6 @@ async function cargarMateriasSelects() {
             sel.innerHTML = '<option value="">-- Selecciona --</option>' +
                 state.materias.map(m => `<option value="${m.id}">${m.nombre} (${m.clave})</option>`).join('');
         });
-        // Listeners
         document.getElementById('sel-materia-activa').onchange = actualizarInfoGrupoActiva;
         document.getElementById('sel-materia-grupos').onchange = cargarGruposDeMateria;
         document.getElementById('sel-materia-qr').onchange = cargarGruposQR;
@@ -175,11 +196,12 @@ async function cargarMateriasSelects() {
     }
 }
 
+// 2. Cargar lista de materias (SIN barra final)
 async function cargarMaterias() {
     const cont = document.getElementById('lista-materias');
     cont.innerHTML = '<p style="color:var(--text-soft)">Cargando...</p>';
     try {
-        const materias = await api('/api/materias/');
+        const materias = await api('/api/materias'); // <-- Sin barra
         if (!materias.length) {
             cont.innerHTML = '<p style="color:var(--text-soft)">No tienes materias. Crea la primera.</p>';
             return;
@@ -199,6 +221,7 @@ async function cargarMaterias() {
     }
 }
 
+// 3. Crear nueva materia (SIN barra final)
 document.getElementById('btn-nueva-materia').addEventListener('click', () => {
     openModal('Nueva materia', `
         <form id="form-nueva-materia">
@@ -218,7 +241,7 @@ document.getElementById('btn-nueva-materia').addEventListener('click', () => {
         e.preventDefault();
         const fd = new FormData(e.target);
         try {
-            await api('/api/materias/', {
+            await api('/api/materias', { // <-- Sin barra
                 method: 'POST',
                 body: JSON.stringify({
                     nombre: fd.get('nombre'),
