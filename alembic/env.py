@@ -1,7 +1,15 @@
+import os
+from dotenv import load_dotenv
+
+# Cargar el archivo .env explícitamente
+load_dotenv()
+
+# Buscar la URL configurada
+config_url = os.getenv("DATABASE_URL")
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
-import os, sys
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -10,7 +18,9 @@ from app.core.config import settings
 from app.models import *  # noqa
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+if config_url:
+    # Esto sobreescribe la URL del archivo alembic.ini con la de tu .env local
+    config.set_main_option("sqlalchemy.url", config_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

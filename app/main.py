@@ -16,6 +16,10 @@ from app.routers.admin import seed_initial_users
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Forzamos a SQLAlchemy a crear las tablas si no existen en Docker
+    from app.core.database import Base, engine
+    from app.models import user, materia, grupo, alumno, asistencia  # Import necesario
+    Base.metadata.create_all(bind=engine)
     seed_initial_users()
     yield
 

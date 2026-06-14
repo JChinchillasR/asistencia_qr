@@ -11,9 +11,21 @@ const state = {
 // ============ API HELPER ============
 async function api(path, options = {}) {
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-    if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+    
+    // 🚨 CORRECCIÓN: Si no está en memoria (state), lo rescatamos del localStorage
+    const tokenActivo = state.token || localStorage.getItem('token');
+    
+    if (tokenActivo) {
+        headers['Authorization'] = `Bearer ${tokenActivo}`;
+    }
+    
     const res = await fetch(path, { ...options, headers });
-    if (res.status === 401) { logout(); throw new Error('Sesión expirada'); }
+    
+    if (res.status === 401) { 
+        logout(); 
+        throw new Error('Sesión expirada'); 
+    }
+    
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
         const data = await res.json();
@@ -58,11 +70,15 @@ document.getElementById('form-login').addEventListener('submit', async e => {
             method: 'POST',
             body: JSON.stringify({ email, password }),
         });
+        
         state.token = data.access_token;
         state.user = data.user;
         localStorage.setItem('token', state.token);
         localStorage.setItem('user', JSON.stringify(state.user));
-        iniciarApp();
+        
+        // 🚨 LA CLAVE: Le pasamos el token en mano para el primer ciclo de carga
+        iniciarApp(data.access_token); 
+        
     } catch (err) {
         errEl.textContent = err.message || 'Credenciales inválidas';
         errEl.classList.remove('oculto');
@@ -112,13 +128,29 @@ function cambiarVista(view) {
 }
 
 // ============ INICIAR APP ============
-function iniciarApp() {
+function iniciarApp(tokenDirecto = null) {
+    // Si pasamos el token directo, lo forzamos en el estado de inmediato
+    if (tokenDirecto) {
+        state.token = tokenDirecto;
+    } else {
+        state.token = state.token || localStorage.getItem('token');
+    }
+    
+    if (!state.token) {
+        logout();
+        return;
+    }
+
     document.getElementById('pantalla-login').classList.remove('activa');
     document.getElementById('app').classList.add('activa');
-    document.getElementById('user-name').textContent = state.user.full_name;
-    if (state.user.role === 'admin') {
-        document.querySelector('.nav-item.solo-admin').classList.remove('oculto');
+    
+    if (state.user && state.user.full_name) {
+        document.getElementById('user-name').textContent = state.user.full_name;
+        if (state.user.role === 'admin') {
+            document.querySelector('.nav-item.solo-admin').classList.remove('oculto');
+        }
     }
+    
     cargarMateriasSelects();
     cambiarVista('tomar-lista');
 }

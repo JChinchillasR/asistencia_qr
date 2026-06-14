@@ -1,30 +1,14 @@
+#!/bin/sh
 
-### `quickstart.sh`
-```bash
-#!/bin/bash
-set -e
+echo "Esperando a que la base de datos esté lista..."
+# Reemplaza 'db' y '5432' con tus variables si es necesario
+while ! nc -z db 5432; do
+  sleep 0.5
+done
+echo "¡Base de datos detectada!"
 
-echo "🚀 Iniciando Sistema de Asistencia QR..."
+echo "Ejecutando migraciones de Alembic..."
+alembic upgrade head
 
-# Crear estructura de carpetas
-mkdir -p app/{core,models,schemas,routers,services,static/{css,js}}
-mkdir -p alembic/versions
-
-# Verificar .env
-if [ ! -f .env ]; then
-    echo "⚠️  Copiando .env.example a .env"
-    cp .env.example .env
-    echo "⚠️  ⚠️  EDITA .env Y CAMBIA EL SECRET_KEY antes de continuar"
-fi
-
-# Crear red docker si no existe
-docker network create asistencia-net 2>/dev/null || true
-
-# Levantar servicios
-docker compose down 2>/dev/null || true
-docker compose up --build -d
-
-echo ""
-echo "✅ Sistema listo en http://localhost"
-echo "📋 Ver logs: docker compose logs -f api"
-echo "🛑 Detener: docker compose down"
+echo "Iniciando servidor FastAPI con Uvicorn..."
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
