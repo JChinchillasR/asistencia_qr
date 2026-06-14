@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sistema de Asistencia QR</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+    <!-- PANTALLA DE LOGIN -->
+    <div id="pantalla-login" class="pantalla activa">
+        <div class="auth-card">
+            <div class="logo">📋</div>
+            <h1>Asistencia QR</h1>
+            <p class="subtitle">Inicia sesión para continuar</p>
+            <form id="form-login">
+                <input type="email" id="login-email" placeholder="Correo electrónico" required autocomplete="email">
+                <input type="password" id="login-password" placeholder="Contraseña" required autocomplete="current-password">
+                <button type="submit" class="btn btn-primary">Entrar</button>
+            </form>
+            <div id="login-error" class="alert alert-error oculto"></div>
+            <div class="demo-hint">
+                <strong>Demo:</strong><br>
+                admin@demo.com / admin123<br>
+                profesor@demo.com / profesor123
+            </div>
+        </div>
+    </div>
+
+    <!-- APP PRINCIPAL -->
+    <div id="app" class="pantalla">
+        <header class="topbar">
+            <div class="topbar-left">
+                <button id="btn-menu" class="icon-btn" aria-label="Menú">☰</button>
+                <h1 class="app-title">Asistencia QR</h1>
+            </div>
+            <div class="topbar-right">
+                <span id="user-name" class="user-chip"></span>
+                <button id="btn-logout" class="icon-btn" aria-label="Salir">⎋</button>
+            </div>
+        </header>
+
+        <aside id="sidebar" class="sidebar">
+            <nav class="nav-menu">
+                <a href="#" data-view="tomar-lista" class="nav-item active">
+                    <span class="nav-icon">📱</span>
+                    <span>Tomar lista</span>
+                </a>
+                <a href="#" data-view="mis-materias" class="nav-item">
+                    <span class="nav-icon">📚</span>
+                    <span>Mis materias</span>
+                </a>
+                <a href="#" data-view="grupos" class="nav-item">
+                    <span class="nav-icon">👥</span>
+                    <span>Grupos y alumnos</span>
+                </a>
+                <a href="#" data-view="generar-qr" class="nav-item">
+                    <span class="nav-icon">🖼️</span>
+                    <span>Generar QRs</span>
+                </a>
+                <a href="#" data-view="reportes" class="nav-item">
+                    <span class="nav-icon">📊</span>
+                    <span>Reportes</span>
+                </a>
+                <a href="#" data-view="usuarios" class="nav-item solo-admin oculto">
+                    <span class="nav-icon">👤</span>
+                    <span>Usuarios</span>
+                </a>
+            </nav>
+        </aside>
+
+        <main class="content">
+            <!-- TOMAR LISTA -->
+            <section id="view-tomar-lista" class="view activa">
+                <div class="view-header">
+                    <h2>Tomar lista</h2>
+                    <p class="view-subtitle">Escanea el código QR de los alumnos</p>
+                </div>
+                <div class="card">
+                    <label>Materia</label>
+                    <select id="sel-materia-activa"></select>
+                    <div id="info-grupo-activa" class="info-box"></div>
+                    <button id="btn-camara" class="btn btn-primary btn-block">
+                        🎥 Encender cámara
+                    </button>
+                    <div id="reader" class="reader oculto"></div>
+                    <div id="resultado-escaneo" class="resultado oculto"></div>
+                </div>
+            </section>
+
+            <!-- MIS MATERIAS -->
+            <section id="view-mis-materias" class="view">
+                <div class="view-header">
+                    <h2>Mis materias</h2>
+                    <button id="btn-nueva-materia" class="btn btn-primary">+ Nueva</button>
+                </div>
+                <div id="lista-materias" class="grid-cards"></div>
+            </section>
+
+            <!-- GRUPOS Y ALUMNOS -->
+            <section id="view-grupos" class="view">
+                <div class="view-header">
+                    <h2>Grupos y alumnos</h2>
+                </div>
+                <div class="card">
+                    <label>Selecciona materia</label>
+                    <select id="sel-materia-grupos"></select>
+                </div>
+                <div id="contenedor-grupos"></div>
+            </section>
+
+            <!-- GENERAR QR -->
+            <section id="view-generar-qr" class="view">
+                <div class="view-header">
+                    <h2>Generar QRs</h2>
+                </div>
+                <div class="card">
+                    <div class="tabs">
+                        <button class="tab activa" data-tab="por-grupo">Por grupo</button>
+                        <button class="tab" data-tab="manual">Lista manual</button>
+                    </div>
+                    <div id="tab-por-grupo" class="tab-content activa">
+                        <label>Materia</label>
+                        <select id="sel-materia-qr"></select>
+                        <label>Grupo</label>
+                        <select id="sel-grupo-qr"></select>
+                        <button id="btn-descargar-qr-grupo" class="btn btn-primary btn-block">
+                            📦 Descargar ZIP del grupo
+                        </button>
+                    </div>
+                    <div id="tab-manual" class="tab-content">
+                        <div class="info-box">
+                            Pega una lista con un alumno por línea. Se generará un ZIP con los QRs.
+                        </div>
+                        <form id="form-qr-manual">
+                            <textarea id="qr-raw-data" rows="10" placeholder="Juan Pérez&#10;María López&#10;..." required></textarea>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                📦 Generar y descargar ZIP
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- REPORTES -->
+            <section id="view-reportes" class="view">
+                <div class="view-header">
+                    <h2>Reportes</h2>
+                </div>
+                <div class="card">
+                    <div class="stats" id="stats-hoy"></div>
+                    <div class="table-wrap">
+                        <table id="tabla-hoy">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Alumno</th>
+                                    <th>Materia</th>
+                                    <th>Grupo</th>
+                                    <th>Hora</th>
+                                    <th>Estatus</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="actions-row">
+                        <button onclick="window.print()" class="btn btn-secondary">🖨️ Imprimir</button>
+                        <a href="/api/reportes/excel/hoy" class="btn btn-primary" target="_blank">📅 Excel de hoy</a>
+                        <a href="/api/reportes/excel/historial" class="btn btn-primary" target="_blank">📥 Historial completo</a>
+                    </div>
+                </div>
+            </section>
+
+            <!-- USUARIOS (admin) -->
+            <section id="view-usuarios" class="view">
+                <div class="view-header">
+                    <h2>Usuarios</h2>
+                    <button id="btn-nuevo-usuario" class="btn btn-primary">+ Nuevo</button>
+                </div>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table id="tabla-usuarios">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Nombre</th>
+                                    <th>Email</th>
+                                    <th>Rol</th>
+                                    <th>Activo</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- MODAL GENÉRICO -->
+    <div id="modal" class="modal oculto">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title"></h3>
+                <button class="icon-btn modal-close">×</button>
+            </div>
+            <div id="modal-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- TOAST -->
+    <div id="toast" class="toast oculto"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

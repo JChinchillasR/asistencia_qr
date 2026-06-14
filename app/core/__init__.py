@@ -1,0 +1,1 @@
+"""Módulo de configuración central, base de datos y seguridad."""

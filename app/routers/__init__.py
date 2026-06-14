@@ -1,0 +1,1 @@
+"""Endpoints y rutas de la API organizados por dominio."""
