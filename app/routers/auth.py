@@ -7,7 +7,7 @@ from app.core.security import (
 from app.core.dependencies import get_current_user, require_admin
 from app.models.user import User
 from app.schemas.user import (
-    UserCreate, UserOut, Token, LoginRequest,
+    UserCreate, UserEdit, UserOut, Token, LoginRequest,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -43,6 +43,30 @@ def register(payload: UserCreate, db: Session = Depends(get_db), admin: User = D
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/edit", response_model=UserOut)
+def edit_user(payload: UserEdit, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    user = db.query(User).filter(User.id == payload.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    duplicate = (
+        db.query(User)
+        .filter(User.email == payload.email, User.id != payload.id)
+        .first()
+    )
+    if duplicate:
+        raise HTTPException(status_code=400, detail="El email ya está registrado")
+
+    user.email = payload.email
+    user.full_name = payload.full_name
+    user.role = payload.role
+    user.is_active = payload.is_active
+
     db.commit()
     db.refresh(user)
     return user

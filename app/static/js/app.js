@@ -1131,7 +1131,7 @@ async function cargarReporteHoy() {
 // ============ USUARIOS (admin) ============
 async function cargarUsuarios() {
     const tbody = document.querySelector('#tabla-usuarios tbody');
-    tbody.innerHTML = '<tr><td colspan="5">Cargando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6">Cargando...</td></tr>';
     try {
         const users = await api('/api/auth/users');
         tbody.innerHTML = users.map(u => `
@@ -1141,10 +1141,23 @@ async function cargarUsuarios() {
                 <td>${u.email}</td>
                 <td><span class="badge">${u.role}</span></td>
                 <td>${u.is_active ? '✅' : '❌'}</td>
+                <td>
+                    <button type="button" data-user-id="${u.id}" class="btn btn-secondary btn-editar-usuario">Editar</button>
+                </td>
             </tr>
         `).join('');
+
+        tbody.querySelectorAll('.btn-editar-usuario').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const userId = parseInt(this.dataset.userId, 10);
+                const user = users.find(u => u.id === userId);
+                if (user) {
+                    abrirEditarUsuario(user);
+                }
+            });
+        });
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="5" class="alert alert-error">${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="alert alert-error">${err.message}</td></tr>`;
     }
 }
 
@@ -1189,6 +1202,58 @@ document.getElementById('btn-nuevo-usuario').addEventListener('click', () => {
         }
     };
 });
+
+function abrirEditarUsuario(user) {
+    const fullName = String(user.full_name).replace(/"/g, '&quot;');
+    const email = String(user.email).replace(/"/g, '&quot;');
+    const activo = user.is_active ? 'checked' : '';
+    const selectedProfesor = user.role === 'profesor' ? 'selected' : '';
+    const selectedAdmin = user.role === 'admin' ? 'selected' : '';
+
+    openModal('Editar usuario', `
+        <form id="form-editar-usuario">
+            <input type="hidden" name="id" value="${user.id}">
+            <label>Nombre completo</label>
+            <input type="text" name="full_name" required value="${fullName}">
+            <label>Email</label>
+            <input type="email" name="email" required value="${email}">
+            <label>Activo</label>
+            <input type="checkbox" name="is_active" ${activo}>
+            <label>Rol</label>
+            <select name="role">
+                <option value="profesor" ${selectedProfesor}>Profesor</option>
+                <option value="admin" ${selectedAdmin}>Administrador</option>
+            </select>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Guardar cambios</button>
+            </div>
+        </form>
+    `);
+
+    document.getElementById('form-editar-usuario').onsubmit = async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        try {
+            await api('/api/auth/edit', {
+                method: 'POST',
+                body: JSON.stringify({
+                    id: parseInt(fd.get('id'), 10),
+                    full_name: fd.get('full_name'),
+                    email: fd.get('email'),
+                    is_active: fd.get('is_active') === 'on',
+                    role: fd.get('role'),
+                }),
+            });
+            closeModal();
+            toast('Usuario actualizado');
+            cargarUsuarios();
+        } catch (err) {
+            toast('Error: ' + err.message);
+        }
+    };
+}
+
 
 // ============ ENDPOINT QR MANUAL (lo añadimos al backend) ============
 // Nota: este endpoint se define en app/routers/qr.py
