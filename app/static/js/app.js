@@ -10,7 +10,7 @@ const state = {
 
 // ============ API HELPER (Con lectura de error del backend) ============
 async function api(path, options = {}) {
-    if (hpat.endsWith('/') && path.length > 1) {
+    if (path.endsWith('/') && path.length > 1) {
         path = path.slice(0, -1);
     }
     
@@ -1089,6 +1089,72 @@ if (formQrManual) {
             toast('❌ Error: ' + err.message);
         }
     });
+}
+
+// ============ DESCARGAR EXCEL CON AUTENTICACIÓN ============
+
+async function descargarExcelHoy() {
+    toast('⏳ Generando reporte de hoy, por favor espera...');
+    try {
+        const currentToken = state.token || localStorage.getItem('token');
+        
+        const res = await fetch('/api/reportes/excel/hoy', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${currentToken}`
+            }
+        });
+        
+        if (!res.ok) throw new Error('No autorizado o error en el servidor');
+        
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'asistencia_hoy.xlsx';
+        
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        toast('✅ ¡Descarga de "Hoy" iniciada!');
+    } catch (err) {
+        console.error(err);
+        toast('❌ Error al descargar: ' + err.message);
+    }
+}
+
+async function descargarExcelHistorial() {
+    toast('⏳ Generando historial completo, por favor espera...');
+    try {
+        const currentToken = state.token || localStorage.getItem('token');
+        
+        const res = await fetch('/api/reportes/excel/historial', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${currentToken}`
+            }
+        });
+        
+        if (!res.ok) throw new Error('No autorizado o error en el servidor');
+        
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'historial_completo.xlsx';
+        
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        toast('✅ ¡Descarga del "Historial" iniciada!');
+    } catch (err) {
+        console.error(err);
+        toast('❌ Error al descargar: ' + err.message);
+    }
 }
 
 // ============ REPORTES ============
