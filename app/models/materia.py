@@ -10,10 +10,16 @@ class Materia(Base):
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String, nullable=False)
     clave = Column(String, unique=True, nullable=False)
-    semestre = Column(String, nullable=False)  # ej. "2026-2"
+    semestre = Column(String, nullable=False)
     profesor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     activa = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     profesor = relationship("User", backref="materias")
-    grupos = relationship("Grupo", back_populates="materia", cascade="all, delete-orphan")
+    
+    # Relación N:M con grupos (a través de grupos_materias)
+    grupos = relationship(
+        "Grupo",
+        secondary="grupos_materias",
+        back_populates="materias"
+    )

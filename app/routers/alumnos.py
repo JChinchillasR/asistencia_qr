@@ -11,12 +11,24 @@ router = APIRouter(prefix="/api/alumnos", tags=["alumnos"])
 
 
 def _verificar_grupo(db: Session, grupo_id: int, user: User) -> Grupo:
+    """
+    Verifica que el grupo exista y que el usuario tenga permiso.
+    En el nuevo modelo, un profesor tiene permiso si el grupo tiene 
+    asignada ALGUNA de sus materias.
+    """
     g = db.query(Grupo).filter(Grupo.id == grupo_id).first()
     if not g:
         raise HTTPException(404, "Grupo no encontrado")
-    if user.role != "admin":
-        if g.materia.profesor_id != user.id:
-            raise HTTPException(403, "No autorizado")
+    
+    # Si es admin, tiene permiso total
+    if user.role == "admin":
+        return g
+        
+    # Si es profesor, verificamos si el grupo tiene asignada alguna materia de este profesor
+    tiene_permiso = any(m.profesor_id == user.id for m in g.materias)
+    if not tiene_permiso:
+        raise HTTPException(403, "No autorizado: Este grupo no tiene asignada ninguna de tus materias")
+        
     return g
 
 
@@ -42,8 +54,10 @@ def crear_alumno(
     user: User = Depends(get_current_user),
 ):
     _verificar_grupo(db, payload.grupo_id, user)
+    
     if db.query(Alumno).filter(Alumno.matricula == payload.matricula).first():
-        raise HTTPException(400, "La matrícula ya existe")
+        raise HTTPException(400, "La matrícula ya existe en el sistema")
+        
     a = Alumno(**payload.model_dump())
     db.add(a)
     db.commit()
@@ -62,10 +76,11 @@ def crear_alumnos_masivo(
     creados = []
     for payload in alumnos:
         if db.query(Alumno).filter(Alumno.matricula == payload.matricula).first():
-            continue
+            continue # Saltar si ya existe, o podrías lanzar error
         a = Alumno(**payload.model_dump())
         db.add(a)
         creados.append(a)
+    
     db.commit()
     for a in creados:
         db.refresh(a)
@@ -80,7 +95,7 @@ def eliminar_alumno(
 ):
     a = db.query(Alumno).filter(Alumno.id == alumno_id).first()
     if not a:
-        raise HTTPException(404, "No encontrado")
+        raise HTTPException(404, "Alumno no encontrado")
     _verificar_grupo(db, a.grupo_id, user)
     db.delete(a)
     db.commit()

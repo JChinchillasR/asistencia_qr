@@ -58,9 +58,16 @@ def registrar(
 
         print(f"✅ Alumno encontrado: {alumno.nombre_completo} (ID: {alumno.id})")
 
-        # 3. Verificar que el alumno pertenece a un grupo de la materia
-        if alumno.grupo.materia_id != materia.id:
-            print(f"⚠️ ADVERTENCIA: El alumno pertenece a otra materia")
+        # 3. Verificar que el grupo del alumno toma esta materia (Relación N:M)
+        try:
+            # Verificamos si la materia está en la lista de materias del grupo del alumno
+            grupo_toma_materia = any(m.id == materia.id for m in alumno.grupo.materias)
+        except AttributeError:
+            # Por si el grupo fue eliminado pero el alumno quedó huérfano
+            grupo_toma_materia = False
+
+        if not grupo_toma_materia:
+            print(f"⚠️ ADVERTENCIA: El grupo '{alumno.grupo.nombre}' del alumno no toma esta materia")
             return AsistenciaRespuesta(
                 status="NO_ENCONTRADO",
                 alumno=alumno.nombre_completo,

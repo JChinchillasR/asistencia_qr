@@ -132,22 +132,34 @@ document.getElementById('form-login').addEventListener('submit', async e => {
 
 // ============ CERRAR SESIÓN ============
 function logout() {
+    console.log("🚪 Cerrando sesión..."); // Diagnóstico
+    
     state.token = null;
     state.user = null;
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     
     // 1. Volver a mostrar la pantalla de login
-    document.getElementById('pantalla-login').classList.remove('oculto');
+    const loginScreen = document.getElementById('pantalla-login');
+    if (loginScreen) {
+        loginScreen.classList.remove('oculto');
+        loginScreen.style.display = 'flex';
+    }
     
     // 2. Ocultar la app principal
-    document.getElementById('app').classList.remove('activa');
+    const appScreen = document.getElementById('app');
+    if (appScreen) {
+        appScreen.classList.remove('activa');
+        appScreen.style.display = 'none';
+    }
     
     // 3. Limpiar formulario
-    document.getElementById('form-login').reset();
-    document.getElementById('login-error').classList.add('oculto');
+    const formLogin = document.getElementById('form-login');
+    if (formLogin) formLogin.reset();
+    
+    const errEl = document.getElementById('login-error');
+    if (errEl) errEl.classList.add('oculto');
 }
-
 // ============ NAVEGACIÓN ============
 document.getElementById('btn-menu').addEventListener('click', () => {
     document.getElementById('sidebar').classList.toggle('abierto');
@@ -229,12 +241,13 @@ function logout() {
     if (errEl) errEl.classList.add('oculto');
 }
 
-// ============ MATERIAS ============
-// 1. Cargar selects (SIN barra final)
+// ============ MATERIAS Y GRUPOS (NUEVO FLUJO N:M) ============
+
+// 1. Cargar selects para Tomar Lista y Generar QR
 async function cargarMateriasSelects() {
     try {
-        state.materias = await api('/api/materias'); // <-- Sin barra
-        const selects = ['sel-materia-activa', 'sel-materia-grupos', 'sel-materia-qr'];
+        state.materias = await api('/api/materias');
+        const selects = ['sel-materia-activa', 'sel-materia-qr'];
         selects.forEach(id => {
             const sel = document.getElementById(id);
             if (!sel) return;
@@ -242,19 +255,33 @@ async function cargarMateriasSelects() {
                 state.materias.map(m => `<option value="${m.id}">${m.nombre} (${m.clave})</option>`).join('');
         });
         document.getElementById('sel-materia-activa').onchange = actualizarInfoGrupoActiva;
-        document.getElementById('sel-materia-grupos').onchange = cargarGruposDeMateria;
         document.getElementById('sel-materia-qr').onchange = cargarGruposQR;
     } catch (err) {
         toast('Error al cargar materias: ' + err.message);
     }
 }
 
-// 2. Cargar lista de materias (SIN barra final)
+// 2. Actualizar info en "Tomar Lista"
+async function actualizarInfoGrupoActiva() {
+    const materiaId = document.getElementById('sel-materia-activa').value;
+    const info = document.getElementById('info-grupo-activa');
+    if (!materiaId) { info.innerHTML = ''; return; }
+    try {
+        // Usamos el endpoint que devuelve los grupos de esa materia
+        const grupos = await api(`/api/grupos/materia/${materiaId}`);
+        const totalAlumnos = grupos.reduce((acc, g) => acc + (g.alumnos_count || 0), 0); // Nota: ajustaremos esto si es necesario, o contamos en frontend
+        info.innerHTML = `<strong>${grupos.length}</strong> grupo(s) asignado(s) a esta materia.`;
+    } catch (err) {
+        info.innerHTML = '';
+    }
+}
+
+// 3. Listar todas las materias (con opción de asignar grupos)
 async function cargarMaterias() {
     const cont = document.getElementById('lista-materias');
     cont.innerHTML = '<p style="color:var(--text-soft)">Cargando...</p>';
     try {
-        const materias = await api('/api/materias'); // <-- Sin barra
+        const materias = await api('/api/materias');
         if (!materias.length) {
             cont.innerHTML = '<p style="color:var(--text-soft)">No tienes materias. Crea la primera.</p>';
             return;
@@ -264,7 +291,7 @@ async function cargarMaterias() {
                 <h3>${m.nombre}</h3>
                 <div class="meta">Clave: ${m.clave} · Semestre: ${m.semestre}</div>
                 <div class="acciones">
-                    <button class="btn btn-sm btn-secondary" onclick="verGruposMateria(${m.id})">👥 Grupos</button>
+                    <button class="btn btn-sm btn-primary" onclick="asignarGruposAMateria(${m.id}, '${m.nombre}')">👥 Asignar Grupos</button>
                     <button class="btn btn-sm btn-danger" onclick="eliminarMateria(${m.id})">🗑️</button>
                 </div>
             </div>
@@ -274,7 +301,7 @@ async function cargarMaterias() {
     }
 }
 
-// 3. Crear nueva materia (SIN barra final)
+// 4. Crear nueva materia
 document.getElementById('btn-nueva-materia').addEventListener('click', () => {
     openModal('Nueva materia', `
         <form id="form-nueva-materia">
@@ -294,7 +321,7 @@ document.getElementById('btn-nueva-materia').addEventListener('click', () => {
         e.preventDefault();
         const fd = new FormData(e.target);
         try {
-            await api('/api/materias', { // <-- Sin barra
+            await api('/api/materias', {
                 method: 'POST',
                 body: JSON.stringify({
                     nombre: fd.get('nombre'),
@@ -313,7 +340,7 @@ document.getElementById('btn-nueva-materia').addEventListener('click', () => {
 });
 
 async function eliminarMateria(id) {
-    if (!confirm('¿Eliminar esta materia y todos sus grupos/alumnos?')) return;
+    if (!confirm('¿Eliminar esta materia? (Los grupos y alumnos NO se eliminarán)')) return;
     try {
         await api(`/api/materias/${id}`, { method: 'DELETE' });
         toast('Materia eliminada');
@@ -324,80 +351,149 @@ async function eliminarMateria(id) {
     }
 }
 
-function verGruposMateria(materiaId) {
-    document.getElementById('sel-materia-grupos').value = materiaId;
-    cambiarVista('grupos');
+// 5. Asignar grupos a una materia
+async function asignarGruposAMateria(materiaId, materiaNombre) {
+    try {
+        // Obtener todos los grupos
+        const todosLosGrupos = await api('/api/grupos');
+        // Obtener los grupos ya asignados a esta materia
+        const gruposAsignados = await api(`/api/grupos/materia/${materiaId}`);
+        const idsAsignados = new Set(gruposAsignados.map(g => g.id));
+
+        const opciones = todosLosGrupos.map(g => {
+            const isChecked = idsAsignados.has(g.id) ? 'checked' : '';
+            return `<label style="display:flex; align-items:center; gap:8px; margin:8px 0; font-weight:normal; text-transform:none;">
+                <input type="checkbox" name="grupos" value="${g.id}" ${isChecked}> ${g.nombre}
+            </label>`;
+        }).join('');
+
+        openModal(`Asignar grupos a: ${materiaNombre}`, `
+            <div class="info-box">Selecciona los grupos que tomarán esta materia.</div>
+            <form id="form-asignar-grupos">
+                <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 8px;">
+                    ${opciones || '<p style="color:var(--text-soft)">No hay grupos creados aún.</p>'}
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Asignaciones</button>
+                </div>
+            </form>
+        `);
+
+        document.getElementById('form-asignar-grupos').onsubmit = async e => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const gruposSeleccionados = fd.getAll('grupos').map(Number);
+            
+            toast('⏳ Actualizando asignaciones...');
+            try {
+                // Por simplicidad, quitamos todas y agregamos las seleccionadas
+                // (En una app más grande se haría un diff, pero esto es rápido y efectivo)
+                for (const g of gruposAsignados) {
+                    await api(`/api/grupos/${g.id}/materias/${materiaId}`, { method: 'DELETE' }).catch(() => {});
+                }
+                for (const gId of gruposSeleccionados) {
+                    await api(`/api/grupos/${gId}/materias`, {
+                        method: 'POST',
+                        body: JSON.stringify({ materia_id: materiaId })
+                    }).catch(() => {});
+                }
+                closeModal();
+                toast('✅ Asignaciones actualizadas');
+                actualizarInfoGrupoActiva(); // Refrescar si está en tomar lista
+            } catch (err) {
+                toast('Error: ' + err.message);
+            }
+        };
+    } catch (err) {
+        toast('Error al cargar grupos: ' + err.message);
+    }
 }
 
-// ============ GRUPOS Y ALUMNOS ============
+// 6. Listar todos los grupos (Vista Grupos)
 async function cargarVistaGrupos() {
-    const sel = document.getElementById('sel-materia-grupos');
-    if (sel.value) cargarGruposDeMateria();
-}
-
-async function cargarGruposDeMateria() {
-    const materiaId = document.getElementById('sel-materia-grupos').value;
-    const cont = document.getElementById('contenedor-grupos');
-    if (!materiaId) { cont.innerHTML = ''; return; }
+    const cont = document.getElementById('lista-grupos-globales');
     cont.innerHTML = '<p style="color:var(--text-soft)">Cargando...</p>';
     try {
-        const grupos = await api(`/api/grupos/materia/${materiaId}`);
+        const grupos = await api('/api/grupos');
         if (!grupos.length) {
-            cont.innerHTML = `
-                <div class="card">
-                    <p style="color:var(--text-soft)">Sin grupos. Crea el primero.</p>
-                </div>
-            `;
+            cont.innerHTML = '<p style="color:var(--text-soft)">No hay grupos creados. Crea el primero.</p>';
         } else {
             cont.innerHTML = grupos.map(g => `
-                <div class="card">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <h3>${g.nombre}</h3>
-                        <div>
-                            <button class="btn btn-sm btn-secondary" onclick="verAlumnosGrupo(${g.id}, '${g.nombre}')">👥 Alumnos</button>
-                            <button class="btn btn-sm btn-danger" onclick="eliminarGrupo(${g.id})">🗑️</button>
-                        </div>
+                <div class="grid-card">
+                    <h3>${g.nombre}</h3>
+                    <div class="meta">${g.horario || 'Sin horario definido'}</div>
+                    <div class="acciones">
+                        <button class="btn btn-sm btn-secondary" onclick="verDetalleGrupo(${g.id}, '${g.nombre}')">👁️ Ver Detalle</button>
+                        <button class="btn btn-sm btn-danger" onclick="eliminarGrupo(${g.id})">🗑️</button>
                     </div>
-                    ${g.horario ? `<div class="meta">🕒 ${g.horario}</div>` : ''}
-                    <div id="alumnos-grupo-${g.id}"></div>
                 </div>
             `).join('');
         }
-        // Botón añadir grupo
-        cont.innerHTML += `
-            <div class="card">
-                <button class="btn btn-primary btn-block" onclick="nuevoGrupo(${materiaId})">+ Añadir grupo</button>
-            </div>
-        `;
     } catch (err) {
         cont.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
     }
 }
 
-// ============ VER ALUMNOS DE UN GRUPO (CON TOGGLE) ============
-async function verAlumnosGrupo(grupoId, nombreGrupo) {
-    const cont = document.getElementById(`alumnos-grupo-${grupoId}`);
-    
-    // 🔄 TOGGLE: Si ya está expandido, lo colapsamos
-    if (cont.dataset.expandido === 'true') {
-        cont.innerHTML = '';
-        cont.dataset.expandido = 'false';
-        return;
-    }
-    
-    // Si no está expandido, cargamos los alumnos
-    cont.innerHTML = '<p style="color:var(--text-soft)">Cargando alumnos...</p>';
+// Botón nuevo grupo global
+document.getElementById('btn-nuevo-grupo-global').addEventListener('click', () => {
+    openModal('Nuevo Grupo', `
+        <form id="form-nuevo-grupo-global">
+            <label>Nombre del grupo</label>
+            <input type="text" name="nombre" required placeholder="Ej: Grupo 01">
+            <label>Horario (opcional)</label>
+            <input type="text" name="horario" placeholder="Ej: Lun-Mié 10:00-12:00">
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Crear</button>
+            </div>
+        </form>
+    `);
+    document.getElementById('form-nuevo-grupo-global').onsubmit = async e => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        try {
+            await api('/api/grupos', {
+                method: 'POST',
+                body: JSON.stringify({
+                    nombre: fd.get('nombre'),
+                    horario: fd.get('horario') || '',
+                }),
+            });
+            closeModal();
+            toast('Grupo creado');
+            cargarVistaGrupos();
+        } catch (err) {
+            toast('Error: ' + err.message);
+        }
+    };
+});
+
+async function eliminarGrupo(id) {
+    if (!confirm('¿Eliminar este grupo y a TODOS sus alumnos?')) return;
     try {
-        const alumnos = await api(`/api/alumnos/grupo/${grupoId}`);
-        if (!alumnos.length) {
-            cont.innerHTML = '<p style="color:var(--text-soft); font-size:13px;">Sin alumnos registrados.</p>';
-        } else {
-            cont.innerHTML = `
+        await api(`/api/grupos/${id}`, { method: 'DELETE' });
+        toast('Grupo eliminado');
+        cargarVistaGrupos();
+    } catch (err) {
+        toast('Error: ' + err.message);
+    }
+}
+
+// 7. Ver detalle de un grupo (Alumnos y Materias asignadas)
+async function verDetalleGrupo(grupoId, nombreGrupo) {
+    try {
+        const grupo = await api(`/api/grupos/${grupoId}`);
+        
+        // Renderizar alumnos
+        let alumnosHtml = '<p style="color:var(--text-soft); font-size:13px;">Sin alumnos registrados.</p>';
+        if (grupo.alumnos && grupo.alumnos.length > 0) {
+            alumnosHtml = `
                 <div class="table-wrap">
                     <table>
                         <thead><tr><th>Matrícula</th><th>Nombre</th><th></th></tr></thead>
                         <tbody>
-                            ${alumnos.map(a => `
+                            ${grupo.alumnos.map(a => `
                                 <tr>
                                     <td>${a.matricula}</td>
                                     <td>${a.nombre_completo}</td>
@@ -412,91 +508,94 @@ async function verAlumnosGrupo(grupoId, nombreGrupo) {
                 </div>
             `;
         }
-        cont.innerHTML += `
-            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-                <button class="btn btn-sm btn-primary" onclick="nuevoAlumno(${grupoId})">+ Alumno</button>
-                <button class="btn btn-sm btn-secondary" onclick="nuevoAlumnoMasivo(${grupoId})">+ Varios</button>
-            </div>
-        `;
-        
-        // 🎯 Marcamos este grupo como "expandido"
-        cont.dataset.expandido = 'true';
-    } catch (err) {
-        cont.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
-    }
-}
 
-// ============ VER QR INDIVIDUAL (CON AUTENTICACIÓN) ============
-async function verQRAlumno(alumnoId) {
-    try {
-        const currentToken = state.token || localStorage.getItem('token');
-        const res = await fetch(`/api/qr/alumno/${alumnoId}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${currentToken}`
-            }
-        });
-        
-        if (!res.ok) throw new Error('No autorizado o error al obtener el QR');
-        
-        // Convertimos la imagen en un Blob y la abrimos en nueva pestaña
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-        
-        // Liberamos la URL después de un tiempo para no acumular memoria
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (err) {
-        console.error(err);
-        toast('❌ Error al cargar el QR: ' + err.message);
-    }
-}
-
-function nuevoGrupo(materiaId) {
-    openModal('Nuevo grupo', `
-        <form id="form-nuevo-grupo">
-            <label>Nombre del grupo</label>
-            <input type="text" name="nombre" required placeholder="Ej: Grupo 01">
-            <label>Horario (opcional)</label>
-            <input type="text" name="horario" placeholder="Ej: Lun-Mié 10:00-12:00">
-            <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                <button type="submit" class="btn btn-primary">Crear</button>
-            </div>
-        </form>
-    `);
-    document.getElementById('form-nuevo-grupo').onsubmit = async e => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        try {
-            await api('/api/grupos/', {
-                method: 'POST',
-                body: JSON.stringify({
-                    materia_id: materiaId,
-                    nombre: fd.get('nombre'),
-                    horario: fd.get('horario') || '',
-                }),
-            });
-            closeModal();
-            toast('Grupo creado');
-            cargarGruposDeMateria();
-        } catch (err) {
-            toast('Error: ' + err.message);
+        // Renderizar materias asignadas
+        let materiasHtml = '<p style="color:var(--text-soft); font-size:13px;">Sin materias asignadas.</p>';
+        if (grupo.materias && grupo.materias.length > 0) {
+            materiasHtml = `<ul style="list-style:none; padding:0; margin:0;">` + 
+                grupo.materias.map(m => `<li style="padding:4px 0; border-bottom:1px solid var(--border);">📚 ${m.nombre} (${m.clave})</li>`).join('') + 
+                `</ul>`;
         }
-    };
-}
 
-async function eliminarGrupo(id) {
-    if (!confirm('¿Eliminar este grupo y todos sus alumnos?')) return;
-    try {
-        await api(`/api/grupos/${id}`, { method: 'DELETE' });
-        toast('Grupo eliminado');
-        cargarGruposDeMateria();
+        openModal(`Detalle: ${nombreGrupo}`, `
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                <div>
+                    <h4 style="margin-bottom:10px;">👥 Alumnos</h4>
+                    ${alumnosHtml}
+                    <div style="display:flex; gap:8px; margin-top:10px;">
+                        <button class="btn btn-sm btn-primary" onclick="closeModal(); nuevoAlumno(${grupoId})">+ Alumno</button>
+                        <button class="btn btn-sm btn-secondary" onclick="closeModal(); nuevoAlumnoMasivo(${grupoId})">+ Varios</button>
+                    </div>
+                </div>
+                <div>
+                    <h4 style="margin-bottom:10px;">📚 Materias Asignadas</h4>
+                    ${materiasHtml}
+                    <button class="btn btn-sm btn-primary" style="margin-top:10px;" onclick="closeModal(); asignarGruposAMateriaDesdeGrupo(${grupoId})">+ Asignar Materia</button>
+                </div>
+            </div>
+        `);
     } catch (err) {
         toast('Error: ' + err.message);
     }
 }
 
+// Función auxiliar para asignar materia desde el modal de grupo
+async function asignarGruposAMateriaDesdeGrupo(grupoId) {
+    try {
+        const materias = await api('/api/materias');
+        const grupo = await api(`/api/grupos/${grupoId}`);
+        const idsAsignadas = new Set(grupo.materias.map(m => m.id));
+
+        const opciones = materias.map(m => {
+            const isChecked = idsAsignadas.has(m.id) ? 'checked' : '';
+            return `<label style="display:flex; align-items:center; gap:8px; margin:8px 0; font-weight:normal; text-transform:none;">
+                <input type="checkbox" name="materias" value="${m.id}" ${isChecked}> ${m.nombre} (${m.clave})
+            </label>`;
+        }).join('');
+
+        openModal('Asignar materias a este grupo', `
+            <form id="form-asignar-materias-grupo">
+                <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 8px;">
+                    ${opciones || '<p style="color:var(--text-soft)">No hay materias creadas.</p>'}
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        `);
+
+        document.getElementById('form-asignar-materias-grupo').onsubmit = async e => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const materiasSeleccionadas = fd.getAll('materias').map(Number);
+            
+            toast('⏳ Actualizando...');
+            try {
+                // Quitar todas las asignaciones actuales de este grupo
+                for (const m of grupo.materias) {
+                    await api(`/api/grupos/${grupoId}/materias/${m.id}`, { method: 'DELETE' }).catch(() => {});
+                }
+                // Agregar las nuevas
+                for (const mId of materiasSeleccionadas) {
+                    await api(`/api/grupos/${grupoId}/materias`, {
+                        method: 'POST',
+                        body: JSON.stringify({ materia_id: mId })
+                    }).catch(() => {});
+                }
+                closeModal();
+                toast('✅ Asignaciones actualizadas');
+                verDetalleGrupo(grupoId, grupo.nombre); // Recargar modal
+            } catch (err) {
+                toast('Error: ' + err.message);
+            }
+        };
+    } catch (err) {
+        toast('Error: ' + err.message);
+    }
+}
+
+// 8. Funciones de Alumnos (sin cambios mayores, solo adaptadas)
 function nuevoAlumno(grupoId) {
     openModal('Nuevo alumno', `
         <form id="form-nuevo-alumno">
@@ -527,7 +626,7 @@ function nuevoAlumno(grupoId) {
             });
             closeModal();
             toast('Alumno creado');
-            verAlumnosGrupo(grupoId, '');
+            verDetalleGrupo(grupoId, 'Grupo'); // Recargar
         } catch (err) {
             toast('Error: ' + err.message);
         }
@@ -566,7 +665,7 @@ function nuevoAlumnoMasivo(grupoId) {
             });
             closeModal();
             toast(`${alumnos.length} alumnos procesados`);
-            verAlumnosGrupo(grupoId, '');
+            verDetalleGrupo(grupoId, 'Grupo');
         } catch (err) {
             toast('Error: ' + err.message);
         }
@@ -578,9 +677,48 @@ async function eliminarAlumno(id, grupoId) {
     try {
         await api(`/api/alumnos/${id}`, { method: 'DELETE' });
         toast('Alumno eliminado');
-        verAlumnosGrupo(grupoId, '');
+        verDetalleGrupo(grupoId, 'Grupo');
     } catch (err) {
         toast('Error: ' + err.message);
+    }
+}
+
+// ============ VER QR INDIVIDUAL DEL ALUMNO ============
+async function verQRAlumno(alumnoId) {
+    console.log("🔍 Intentando ver QR del alumno ID:", alumnoId);
+    
+    try {
+        const currentToken = state.token || localStorage.getItem('token');
+        
+        const res = await fetch(`/api/qr/alumno/${alumnoId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${currentToken}`
+            }
+        });
+        
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`Error del servidor: ${res.status} - ${errText}`);
+        }
+        
+        // Convertir la respuesta en una imagen y abrirla
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        
+        // Abrir en una nueva pestaña
+        const nuevaVentana = window.open(url, '_blank');
+        
+        if (!nuevaVentana) {
+            throw new Error("El navegador bloqueó la ventana emergente. Permite los pop-ups para este sitio.");
+        }
+        
+        // Liberar memoria después de 1 minuto
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        
+    } catch (err) {
+        console.error("❌ Error al cargar el QR:", err);
+        toast('❌ Error: ' + err.message);
     }
 }
 
@@ -1054,6 +1192,16 @@ document.getElementById('btn-nuevo-usuario').addEventListener('click', () => {
 
 // ============ ENDPOINT QR MANUAL (lo añadimos al backend) ============
 // Nota: este endpoint se define en app/routers/qr.py
+// ============ FORZAR EVENTO DE LOGOUT ============
+const btnLogout = document.getElementById('btn-logout');
+if (btnLogout) {
+    btnLogout.addEventListener('click', (e) => {
+        e.preventDefault(); // Prevenir cualquier comportamiento por defecto
+        logout();
+    });
+} else {
+    console.error("❌ ERROR: No se encontró el botón con id 'btn-logout' en el HTML");
+}
 
 // ============ INICIO ============
 if (state.token && state.user) {

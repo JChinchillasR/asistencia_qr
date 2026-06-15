@@ -91,11 +91,11 @@
                 </div>
             </section>
 
-            <!-- MIS MATERIAS -->
+                        <!-- MIS MATERIAS -->
             <section id="view-mis-materias" class="view">
                 <div class="view-header">
                     <h2>Mis materias</h2>
-                    <button id="btn-nueva-materia" class="btn btn-primary">+ Nueva</button>
+                    <button id="btn-nueva-materia" class="btn btn-primary">+ Nueva Materia</button>
                 </div>
                 <div id="lista-materias" class="grid-cards"></div>
             </section>
@@ -103,15 +103,15 @@
             <!-- GRUPOS Y ALUMNOS -->
             <section id="view-grupos" class="view">
                 <div class="view-header">
-                    <h2>Grupos y alumnos</h2>
+                    <h2>Grupos y Alumnos</h2>
+                    <button id="btn-nuevo-grupo-global" class="btn btn-primary">+ Nuevo Grupo</button>
                 </div>
-                <div class="card">
-                    <label>Selecciona materia</label>
-                    <select id="sel-materia-grupos"></select>
+                <div class="info-box" style="margin-bottom: 15px;">
+                    💡 <strong>Nota:</strong> Los grupos son independientes. Después de crearlos y agregar alumnos, podrás asignarlos a las materias que correspondan desde la sección "Mis materias" o desde el detalle del grupo.
                 </div>
-                <div id="contenedor-grupos"></div>
+                <div id="lista-grupos-globales" class="grid-cards"></div>
             </section>
-
+            
             <!-- GENERAR QR -->
             <section id="view-generar-qr" class="view">
                 <div class="view-header">
