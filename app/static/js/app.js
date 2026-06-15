@@ -59,6 +59,29 @@ function toast(msg, duration = 3000) {
     t._timer = setTimeout(() => t.classList.add('oculto'), duration);
 }
 
+// ============ UTILIDAD PARA OBTENER NOMBRE DE ARCHIVO DEL SERVIDOR ============
+function obtenerNombreArchivoDesdeHeaders(response) {
+    const contentDisposition = response.headers.get('content-disposition');
+    if (contentDisposition) {
+        // Regex mejorado: captura el nombre ignorando comillas, UTF-8 tags o puntos y coma
+        const match = contentDisposition.match(/filename\*?=(?:UTF-8'')?"?([^;"\n\r]+)"?/i);
+        if (match && match[1]) {
+            let filename = match[1].trim();
+            
+            // 🎯 Limpieza agresiva: elimina comillas, espacios o guiones bajos al final
+            filename = filename.replace(/["'\s_]+$/g, '');
+            
+            // Asegurar que termine en .zip (por si acaso la limpieza lo afectó)
+            if (!filename.toLowerCase().endsWith('.zip')) {
+                filename += '.zip';
+            }
+            
+            return filename;
+        }
+    }
+    return 'qrs_descargados.zip'; // Nombre por defecto de respaldo
+}
+
 // ============ MODAL ============
 function openModal(title, bodyHtml) {
     document.getElementById('modal-title').textContent = title;
@@ -189,14 +212,21 @@ function logout() {
     localStorage.removeItem('user');
     
     // 1. Volver a mostrar la pantalla de login
-    document.getElementById('pantalla-login').classList.remove('oculto');
+    const loginScreen = document.getElementById('pantalla-login');
+    loginScreen.classList.remove('oculto');
+    loginScreen.style.display = 'flex'; // Restaura el flex original del CSS
     
     // 2. Ocultar la app principal
-    document.getElementById('app').classList.remove('activa');
+    const appScreen = document.getElementById('app');
+    appScreen.classList.remove('activa');
+    appScreen.style.display = 'none'; // Fuerza la ocultación
     
     // 3. Limpiar formulario
-    document.getElementById('form-login').reset();
-    document.getElementById('login-error').classList.add('oculto');
+    const formLogin = document.getElementById('form-login');
+    if (formLogin) formLogin.reset();
+    
+    const errEl = document.getElementById('login-error');
+    if (errEl) errEl.classList.add('oculto');
 }
 
 // ============ MATERIAS ============
@@ -620,14 +650,17 @@ function hablar(texto) {
 // ============ GENERAR QR ============
 function cargarVistaQR() {
     const sel = document.getElementById('sel-materia-qr');
-    if (sel.value) cargarGruposQR();
+    if (sel && sel.value) cargarGruposQR();
 }
 
 async function cargarGruposQR() {
     const materiaId = document.getElementById('sel-materia-qr').value;
     const sel = document.getElementById('sel-grupo-qr');
+    if (!sel) return;
+    
     sel.innerHTML = '<option value="">-- Selecciona --</option>';
     if (!materiaId) return;
+    
     try {
         const grupos = await api(`/api/grupos/materia/${materiaId}`);
         sel.innerHTML += grupos.map(g => `<option value="${g.id}">${g.nombre}</option>`).join('');
@@ -636,43 +669,109 @@ async function cargarGruposQR() {
     }
 }
 
-document.getElementById('btn-descargar-qr-grupo').addEventListener('click', () => {
-    const grupoId = document.getElementById('sel-grupo-qr').value;
-    if (!grupoId) { toast('Selecciona un grupo'); return; }
-    window.open(`/api/qr/zip/grupo/${grupoId}`, '_blank');
-});
+// Evento: Descargar ZIP por Grupo
+const btnDescargarGrupo = document.getElementById('btn-descargar-qr-grupo');
+if (btnDescargarGrupo) {
+    btnDescargarGrupo.addEventListener('click', async () => {
+        const grupoId = document.getElementById('sel-grupo-qr').value;
+        if (!grupoId) { 
+            toast('⚠️ Selecciona un grupo primero'); 
+            return; 
+        }
+        
+        toast('⏳ Generando paquete ZIP, por favor espera...');
+        try {
+            const currentToken = state.token || localStorage.getItem('token');
+            const res = await fetch(`/api/qr/zip/grupo/${grupoId}`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${currentToken}` }
+            });
+            
+            if (!res.ok) throw new Error('No autorizado o error en el servidor');
+            
+            const filename = obtenerNombreArchivoDesdeHeaders(res);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            toast(`✅ ¡Descarga iniciada: ${filename}!`);
+        } catch (err) {
+            console.error(err);
+            toast('❌ Error al generar el ZIP: ' + err.message);
+        }
+    });
+}
 
+// Evento: Cambio de Pestañas (Tabs) - SOLO UNA VEZ
 document.querySelectorAll('.tab').forEach(t => {
     t.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(x => x.classList.remove('activa'));
         document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('activa'));
         t.classList.add('activa');
-        document.getElementById(`tab-${t.dataset.tab}`).classList.add('activa');
+        const tabContent = document.getElementById(`tab-${t.dataset.tab}`);
+        if (tabContent) tabContent.classList.add('activa');
     });
 });
 
-document.getElementById('form-qr-manual').addEventListener('submit', async e => {
-    e.preventDefault();
-    const raw = document.getElementById('qr-raw-data').value;
-    const form = new FormData();
-    form.append('raw_data', raw);
-    try {
-        const res = await fetch('/api/qr/manual', {
-            method: 'POST',
-            body: form,
-        });
-        if (!res.ok) throw new Error('Error al generar');
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'qrs_alta_resolucion.zip';
-        a.click();
-        URL.revokeObjectURL(url);
-    } catch (err) {
-        toast('Error: ' + err.message);
-    }
-});
+// Evento: Descargar ZIP Manual - SOLO UNA VEZ
+const formQrManual = document.getElementById('form-qr-manual');
+if (formQrManual) {
+    // Truco infalible: clonar el nodo elimina cualquier listener previo duplicado
+    const nuevoForm = formQrManual.cloneNode(true);
+    formQrManual.parentNode.replaceChild(nuevoForm, formQrManual);
+    
+    nuevoForm.addEventListener('submit', async e => {
+        e.preventDefault();
+        const raw = document.getElementById('qr-raw-data').value;
+        
+        if (!raw.trim()) { 
+            toast('⚠️ El campo de nombres está vacío'); 
+            return; 
+        }
+        
+        toast('⏳ Generando paquete ZIP, por favor espera...');
+        const form = new FormData();
+        form.append('raw_data', raw);
+        
+        try {
+            const currentToken = state.token || localStorage.getItem('token');
+            const res = await fetch('/api/qr/manual', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentToken}` },
+                body: form,
+            });
+            
+            if (!res.ok) throw new Error('Error al generar el ZIP');
+            
+            const filename = obtenerNombreArchivoDesdeHeaders(res);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            // Limpiar el campo después de descargar
+            document.getElementById('qr-raw-data').value = '';
+            
+            toast(`✅ ¡Descarga iniciada: ${filename} y campo limpiado!`);
+        } catch (err) {
+            console.error(err);
+            toast('❌ Error: ' + err.message);
+        }
+    });
+}
 
 // ============ REPORTES ============
 async function cargarReporteHoy() {
