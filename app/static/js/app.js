@@ -598,14 +598,33 @@ async function actualizarInfoGrupoActiva() {
     }
 }
 
-document.getElementById('btn-camara').addEventListener('click', iniciarScanner);
+// 🎯 EVENTOS DE LOS BOTONES DE CÁMARA
+const btnCamara = document.getElementById('btn-camara');
+const btnDetenerCamara = document.getElementById('btn-detener-camara');
+
+if (btnCamara) {
+    btnCamara.addEventListener('click', iniciarScanner);
+}
+
+if (btnDetenerCamara) {
+    btnDetenerCamara.addEventListener('click', detenerScanner);
+}
 
 async function iniciarScanner() {
     const materiaId = document.getElementById('sel-materia-activa').value;
-    if (!materiaId) { toast('Selecciona una materia'); return; }
+    if (!materiaId) { 
+        toast('⚠️ Selecciona una materia primero'); 
+        return; 
+    }
+    
     const reader = document.getElementById('reader');
     reader.classList.remove('oculto');
-    document.getElementById('btn-camara').style.display = 'none';
+    
+    // 🎯 Alternar visibilidad de botones
+    document.getElementById('btn-camara').classList.add('oculto');
+    document.getElementById('btn-detener-camara').classList.remove('oculto');
+    document.getElementById('resultado-escaneo').classList.add('oculto');
+
     try {
         state.scanner = new Html5Qrcode("reader");
         const config = {
@@ -622,8 +641,7 @@ async function iniciarScanner() {
         ).catch(() => state.scanner.start({ facingMode: "user" }, config, onScanSuccess));
     } catch (err) {
         toast('No se pudo acceder a la cámara: ' + err.message);
-        reader.classList.add('oculto');
-        document.getElementById('btn-camara').style.display = 'block';
+        detenerScanner();
     }
 }
 
@@ -633,24 +651,163 @@ function detenerScanner() {
             state.scanner.clear();
             state.scanner = null;
             document.getElementById('reader').classList.add('oculto');
-            document.getElementById('btn-camara').style.display = 'block';
+            document.getElementById('btn-camara').classList.remove('oculto');
+            document.getElementById('btn-detener-camara').classList.add('oculto');
         }).catch(() => {});
+    } else {
+        // Si no hay scanner activo, solo ocultamos el reader
+        document.getElementById('reader').classList.add('oculto');
+        document.getElementById('btn-camara').classList.remove('oculto');
+        document.getElementById('btn-detener-camara').classList.add('oculto');
     }
+}
+
+// ============ FUNCIONES DE VOZ Y SALUDO ============
+
+// Variable para almacenar la voz seleccionada
+let vozSeleccionada = null;
+
+// Función para cargar y seleccionar la mejor voz disponible
+function cargarVoces() {
+    return new Promise((resolve) => {
+        let voces = speechSynthesis.getVoices();
+        
+        if (voces.length > 0) {
+            resolve(voces);
+            return;
+        }
+        
+        // Si las voces no están cargadas aún, esperar el evento
+        speechSynthesis.addEventListener('voiceschanged', () => {
+            voces = speechSynthesis.getVoices();
+            resolve(voces);
+        }, { once: true });
+        
+        // Timeout de seguridad (3 segundos)
+        setTimeout(() => resolve(voces), 3000);
+    });
+}
+
+// Función para seleccionar la mejor voz en español
+async function seleccionarMejorVoz() {
+    const voces = await cargarVoces();
+    
+    if (voces.length === 0) {
+        console.warn('No se encontraron voces disponibles');
+        return null;
+    }
+    
+    // Prioridad de voces (de mejor a peor)
+    const preferencias = [
+        // Voces de Google (muy naturales)
+        'Google español',
+        'Google español de México',
+        'Google Español',
+        
+        // Voces de Microsoft (Windows)
+        'Microsoft Sabina',
+        'Microsoft Raul',
+        'Microsoft Helena',
+        
+        // Voces de Apple (Mac/iOS)
+        'Monica',
+        'Paulina',
+        
+        // Voces genéricas
+        'es-MX',
+        'es-ES',
+        'español'
+    ];
+    
+    // Buscar la mejor voz disponible
+    for (const preferencia of preferencias) {
+        const voz = voces.find(v => 
+            v.name.includes(preferencia) || 
+            v.lang.includes(preferencia) ||
+            v.lang === 'es-MX' ||
+            v.lang === 'es-ES'
+        );
+        
+        if (voz) {
+            console.log(`✅ Voz seleccionada: ${voz.name} (${voz.lang})`);
+            return voz;
+        }
+    }
+    
+    // Fallback: cualquier voz en español
+    const vozEspanol = voces.find(v => v.lang.startsWith('es'));
+    if (vozEspanol) {
+        console.log(`⚠️ Usando voz genérica: ${vozEspanol.name}`);
+        return vozEspanol;
+    }
+    
+    console.warn('No se encontró ninguna voz en español');
+    return null;
+}
+
+// Función mejorada para hablar
+async function hablar(texto) {
+    if (!('speechSynthesis' in window)) {
+        console.warn('Síntesis de voz no soportada en este navegador');
+        return;
+    }
+    
+    // Cancelar cualquier reproducción anterior
+    window.speechSynthesis.cancel();
+    
+    // Cargar la voz si aún no la tenemos
+    if (!vozSeleccionada) {
+        vozSeleccionada = await seleccionarMejorVoz();
+    }
+    
+    const utterance = new SpeechSynthesisUtterance(texto);
+    
+    // Asignar la voz seleccionada
+    if (vozSeleccionada) {
+        utterance.voice = vozSeleccionada;
+    } else {
+        utterance.lang = 'es-MX'; // Fallback
+    }
+    
+    // Parámetros ajustados para sonar más natural
+    utterance.rate = 1.2;    // Cambiar valor hacia arriba o abajo para cambiar la velocidad (1.0 es normal)
+    utterance.pitch = 1.05;   // Tono ligeramente más agudo (más natural)
+    utterance.volume = 1.0;   // Volumen máximo
+    
+    console.log(`🔊 Reproduciendo: "${texto}"`);
+    window.speechSynthesis.speak(utterance);
+}
+
+function obtenerSaludo(nombre) {
+    if (!nombre) return 'Bienvenido';
+    const primer = nombre.trim().split(/\s+/)[0].toLowerCase();
+    const excep = ['guadalupe','rosario','itzel','abigail','ruth','miriam','monserrat','monse','xóchitl','xochitl'];
+    if (excep.includes(primer) || primer.endsWith('a')) return `Bienvenida, ${nombre}`;
+    return `Bienvenido, ${nombre}`;
 }
 
 async function onScanSuccess(decodedText) {
     const ahora = Date.now();
     if (decodedText === state.ultimoScan.codigo && (ahora - state.ultimoScan.tiempo) < 4000) return;
+    
     state.ultimoScan = { codigo: decodedText, tiempo: ahora };
     const materiaId = document.getElementById('sel-materia-activa').value;
+    
     const resDiv = document.getElementById('resultado-escaneo');
     resDiv.classList.remove('oculto', 'success', 'warning', 'error');
     resDiv.innerHTML = '⏳ Procesando...';
+
     try {
+        console.log("📡 Enviando al servidor:", { qr_token: decodedText.trim(), materia_id: parseInt(materiaId) });
+
         const data = await api('/api/asistencia/registrar', {
             method: 'POST',
-            body: JSON.stringify({ qr_token: decodedText.trim(), materia_id: parseInt(materiaId) }),
+            body: JSON.stringify({ 
+                qr_token: decodedText.trim(), 
+                materia_id: parseInt(materiaId) 
+            }),
         });
+
         if (data.status === 'REGISTRO_NUEVO') {
             resDiv.classList.add('success');
             resDiv.innerHTML = `✅ <strong>${data.materia}</strong><br>${data.alumno} · ${data.grupo} · ${data.hora}`;
@@ -664,25 +821,9 @@ async function onScanSuccess(decodedText) {
             resDiv.innerHTML = `❌ <strong>No encontrado</strong><br>Token: ${data.alumno}`;
         }
     } catch (err) {
+        console.error("❌ ERROR DETALLADO DEL ESCÁNER:", err);
         resDiv.classList.add('error');
-        resDiv.innerHTML = `❌ Error: ${err.message}`;
-    }
-}
-
-function obtenerSaludo(nombre) {
-    if (!nombre) return 'Bienvenido';
-    const primer = nombre.trim().split(/\s+/)[0].toLowerCase();
-    const excep = ['guadalupe','rosario','itzel','abigail','ruth','miriam','monserrat','monse','xóchitl','xochitl'];
-    if (excep.includes(primer) || primer.endsWith('a')) return `Bienvenida, ${nombre}`;
-    return `Bienvenido, ${nombre}`;
-}
-
-function hablar(texto) {
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(texto);
-        u.lang = 'es-MX';
-        window.speechSynthesis.speak(u);
+        resDiv.innerHTML = `❌ <strong>Error de registro</strong><br>${err.message}<br><small>Revisa la consola (F12) para más detalles.</small>`;
     }
 }
 
