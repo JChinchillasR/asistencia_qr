@@ -374,8 +374,18 @@ async function cargarGruposDeMateria() {
     }
 }
 
+// ============ VER ALUMNOS DE UN GRUPO (CON TOGGLE) ============
 async function verAlumnosGrupo(grupoId, nombreGrupo) {
     const cont = document.getElementById(`alumnos-grupo-${grupoId}`);
+    
+    // 🔄 TOGGLE: Si ya está expandido, lo colapsamos
+    if (cont.dataset.expandido === 'true') {
+        cont.innerHTML = '';
+        cont.dataset.expandido = 'false';
+        return;
+    }
+    
+    // Si no está expandido, cargamos los alumnos
     cont.innerHTML = '<p style="color:var(--text-soft)">Cargando alumnos...</p>';
     try {
         const alumnos = await api(`/api/alumnos/grupo/${grupoId}`);
@@ -392,7 +402,7 @@ async function verAlumnosGrupo(grupoId, nombreGrupo) {
                                     <td>${a.matricula}</td>
                                     <td>${a.nombre_completo}</td>
                                     <td>
-                                        <a href="/api/qr/alumno/${a.id}" target="_blank" class="btn btn-sm btn-secondary">QR</a>
+                                        <button class="btn btn-sm btn-secondary" onclick="verQRAlumno(${a.id})">QR</button>
                                         <button class="btn btn-sm btn-danger" onclick="eliminarAlumno(${a.id}, ${grupoId})">×</button>
                                     </td>
                                 </tr>
@@ -408,8 +418,37 @@ async function verAlumnosGrupo(grupoId, nombreGrupo) {
                 <button class="btn btn-sm btn-secondary" onclick="nuevoAlumnoMasivo(${grupoId})">+ Varios</button>
             </div>
         `;
+        
+        // 🎯 Marcamos este grupo como "expandido"
+        cont.dataset.expandido = 'true';
     } catch (err) {
         cont.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
+    }
+}
+
+// ============ VER QR INDIVIDUAL (CON AUTENTICACIÓN) ============
+async function verQRAlumno(alumnoId) {
+    try {
+        const currentToken = state.token || localStorage.getItem('token');
+        const res = await fetch(`/api/qr/alumno/${alumnoId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${currentToken}`
+            }
+        });
+        
+        if (!res.ok) throw new Error('No autorizado o error al obtener el QR');
+        
+        // Convertimos la imagen en un Blob y la abrimos en nueva pestaña
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        
+        // Liberamos la URL después de un tiempo para no acumular memoria
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+        console.error(err);
+        toast('❌ Error al cargar el QR: ' + err.message);
     }
 }
 
