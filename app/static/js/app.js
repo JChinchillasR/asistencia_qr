@@ -106,15 +106,24 @@ document.getElementById('form-login').addEventListener('submit', async e => {
     }
 });
 
+
+// ============ CERRAR SESIÓN ============
 function logout() {
     state.token = null;
     state.user = null;
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    document.getElementById('pantalla-login').classList.add('activa');
+    
+    // 1. Volver a mostrar la pantalla de login
+    document.getElementById('pantalla-login').classList.remove('oculto');
+    
+    // 2. Ocultar la app principal
     document.getElementById('app').classList.remove('activa');
+    
+    // 3. Limpiar formulario
+    document.getElementById('form-login').reset();
+    document.getElementById('login-error').classList.add('oculto');
 }
-document.getElementById('btn-logout').addEventListener('click', logout);
 
 // ============ NAVEGACIÓN ============
 document.getElementById('btn-menu').addEventListener('click', () => {
@@ -149,31 +158,45 @@ function cambiarVista(view) {
 }
 
 // ============ INICIAR APP ============
-function iniciarApp(tokenDirecto = null) {
-    // Si pasamos el token directo, lo forzamos en el estado de inmediato
-    if (tokenDirecto) {
-        state.token = tokenDirecto;
-    } else {
-        state.token = state.token || localStorage.getItem('token');
+function iniciarApp() {
+    // 1. Ocultar definitivamente la pantalla de login forzando el estilo
+    const loginScreen = document.getElementById('pantalla-login');
+    loginScreen.classList.add('oculto');
+    loginScreen.style.display = 'none'; // Fuerza la ocultación sin importar el CSS
+    
+    // 2. Mostrar la app principal
+    const appScreen = document.getElementById('app');
+    appScreen.classList.add('activa');
+    appScreen.style.display = 'block'; // Fuerza la visualización
+    
+    // 3. Configurar datos del usuario
+    document.getElementById('user-name').textContent = state.user.full_name;
+    if (state.user.role === 'admin') {
+        const adminLink = document.querySelector('.nav-item.solo-admin');
+        if (adminLink) adminLink.classList.remove('oculto');
     }
     
-    if (!state.token) {
-        logout();
-        return;
-    }
-
-    document.getElementById('pantalla-login').classList.remove('activa');
-    document.getElementById('app').classList.add('activa');
-    
-    if (state.user && state.user.full_name) {
-        document.getElementById('user-name').textContent = state.user.full_name;
-        if (state.user.role === 'admin') {
-            document.querySelector('.nav-item.solo-admin').classList.remove('oculto');
-        }
-    }
-    
+    // 4. Cargar datos iniciales
     cargarMateriasSelects();
     cambiarVista('tomar-lista');
+}
+
+// ============ CERRAR SESIÓN ============
+function logout() {
+    state.token = null;
+    state.user = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    
+    // 1. Volver a mostrar la pantalla de login
+    document.getElementById('pantalla-login').classList.remove('oculto');
+    
+    // 2. Ocultar la app principal
+    document.getElementById('app').classList.remove('activa');
+    
+    // 3. Limpiar formulario
+    document.getElementById('form-login').reset();
+    document.getElementById('login-error').classList.add('oculto');
 }
 
 // ============ MATERIAS ============
