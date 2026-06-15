@@ -410,7 +410,7 @@ async function asignarGruposAMateria(materiaId, materiaNombre) {
     }
 }
 
-// 6. Listar todos los grupos (Vista Grupos)
+// 6. Listar todos los grupos (Vista Grupos - Formato Horizontal, SIN HORARIO)
 async function cargarVistaGrupos() {
     const cont = document.getElementById('lista-grupos-globales');
     cont.innerHTML = '<p style="color:var(--text-soft)">Cargando...</p>';
@@ -420,12 +420,20 @@ async function cargarVistaGrupos() {
             cont.innerHTML = '<p style="color:var(--text-soft)">No hay grupos creados. Crea el primero.</p>';
         } else {
             cont.innerHTML = grupos.map(g => `
-                <div class="grid-card">
-                    <h3>${g.nombre}</h3>
-                    <div class="meta">${g.horario || 'Sin horario definido'}</div>
-                    <div class="acciones">
-                        <button class="btn btn-sm btn-secondary" onclick="verDetalleGrupo(${g.id}, '${g.nombre}')">👁️ Ver Detalle</button>
-                        <button class="btn btn-sm btn-danger" onclick="eliminarGrupo(${g.id})">🗑️</button>
+                <div class="card" style="width: 100%; margin-bottom: 15px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <div>
+                            <h3 style="margin:0;">${g.nombre}</h3>
+                            <!-- Se eliminó la visualización del horario -->
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-sm btn-secondary" onclick="toggleDetalleGrupo(${g.id}, '${g.nombre.replace(/'/g, "\\'")}')">👥 Ver alumnos</button>
+                            <button class="btn btn-sm btn-danger" onclick="eliminarGrupo(${g.id})">🗑️</button>
+                        </div>
+                    </div>
+                    <!-- Contenedor inline para los detalles -->
+                    <div id="detalle-grupo-${g.id}" style="display:none; margin-top:15px; border-top:1px solid var(--border); padding-top:15px;">
+                        <p style="color:var(--text-soft)">Cargando detalles...</p>
                     </div>
                 </div>
             `).join('');
@@ -435,167 +443,134 @@ async function cargarVistaGrupos() {
     }
 }
 
-// Botón nuevo grupo global
-document.getElementById('btn-nuevo-grupo-global').addEventListener('click', () => {
-    openModal('Nuevo Grupo', `
-        <form id="form-nuevo-grupo-global">
-            <label>Nombre del grupo</label>
-            <input type="text" name="nombre" required placeholder="Ej: Grupo 01">
-            <label>Horario (opcional)</label>
-            <input type="text" name="horario" placeholder="Ej: Lun-Mié 10:00-12:00">
-            <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                <button type="submit" class="btn btn-primary">Crear</button>
-            </div>
-        </form>
-    `);
-    document.getElementById('form-nuevo-grupo-global').onsubmit = async e => {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        try {
-            await api('/api/grupos', {
-                method: 'POST',
-                body: JSON.stringify({
-                    nombre: fd.get('nombre'),
-                    horario: fd.get('horario') || '',
-                }),
-            });
-            closeModal();
-            toast('Grupo creado');
-            cargarVistaGrupos();
-        } catch (err) {
-            toast('Error: ' + err.message);
-        }
-    };
-});
-
-async function eliminarGrupo(id) {
-    if (!confirm('¿Eliminar este grupo y a TODOS sus alumnos?')) return;
-    try {
-        await api(`/api/grupos/${id}`, { method: 'DELETE' });
-        toast('Grupo eliminado');
-        cargarVistaGrupos();
-    } catch (err) {
-        toast('Error: ' + err.message);
-    }
-}
-
-// 7. Ver detalle de un grupo (Alumnos y Materias asignadas)
-async function verDetalleGrupo(grupoId, nombreGrupo) {
-    try {
-        const grupo = await api(`/api/grupos/${grupoId}`);
-        
-        // Renderizar alumnos
-        let alumnosHtml = '<p style="color:var(--text-soft); font-size:13px;">Sin alumnos registrados.</p>';
-        if (grupo.alumnos && grupo.alumnos.length > 0) {
-            alumnosHtml = `
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr><th>Matrícula</th><th>Nombre</th><th></th></tr></thead>
-                        <tbody>
-                            ${grupo.alumnos.map(a => `
-                                <tr>
-                                    <td>${a.matricula}</td>
-                                    <td>${a.nombre_completo}</td>
-                                    <td>
-                                        <button class="btn btn-sm btn-secondary" onclick="verQRAlumno(${a.id})">QR</button>
-                                        <button class="btn btn-sm btn-danger" onclick="eliminarAlumno(${a.id}, ${grupoId})">×</button>
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-        }
-
-        // Renderizar materias asignadas
-        let materiasHtml = '<p style="color:var(--text-soft); font-size:13px;">Sin materias asignadas.</p>';
-        if (grupo.materias && grupo.materias.length > 0) {
-            materiasHtml = `<ul style="list-style:none; padding:0; margin:0;">` + 
-                grupo.materias.map(m => `<li style="padding:4px 0; border-bottom:1px solid var(--border);">📚 ${m.nombre} (${m.clave})</li>`).join('') + 
-                `</ul>`;
-        }
-
-        openModal(`Detalle: ${nombreGrupo}`, `
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
-                <div>
-                    <h4 style="margin-bottom:10px;">👥 Alumnos</h4>
-                    ${alumnosHtml}
-                    <div style="display:flex; gap:8px; margin-top:10px;">
-                        <button class="btn btn-sm btn-primary" onclick="closeModal(); nuevoAlumno(${grupoId})">+ Alumno</button>
-                        <button class="btn btn-sm btn-secondary" onclick="closeModal(); nuevoAlumnoMasivo(${grupoId})">+ Varios</button>
-                    </div>
-                </div>
-                <div>
-                    <h4 style="margin-bottom:10px;">📚 Materias Asignadas</h4>
-                    ${materiasHtml}
-                    <button class="btn btn-sm btn-primary" style="margin-top:10px;" onclick="closeModal(); asignarGruposAMateriaDesdeGrupo(${grupoId})">+ Asignar Materia</button>
-                </div>
-            </div>
-        `);
-    } catch (err) {
-        toast('Error: ' + err.message);
-    }
-}
-
-// Función auxiliar para asignar materia desde el modal de grupo
-async function asignarGruposAMateriaDesdeGrupo(grupoId) {
-    try {
-        const materias = await api('/api/materias');
-        const grupo = await api(`/api/grupos/${grupoId}`);
-        const idsAsignadas = new Set(grupo.materias.map(m => m.id));
-
-        const opciones = materias.map(m => {
-            const isChecked = idsAsignadas.has(m.id) ? 'checked' : '';
-            return `<label style="display:flex; align-items:center; gap:8px; margin:8px 0; font-weight:normal; text-transform:none;">
-                <input type="checkbox" name="materias" value="${m.id}" ${isChecked}> ${m.nombre} (${m.clave})
-            </label>`;
-        }).join('');
-
-        openModal('Asignar materias a este grupo', `
-            <form id="form-asignar-materias-grupo">
-                <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 8px;">
-                    ${opciones || '<p style="color:var(--text-soft)">No hay materias creadas.</p>'}
-                </div>
+// 🎯 BLINDAJE DEL BOTÓN "NUEVO GRUPO" (SIN HORARIO)
+const btnNuevoGrupoGlobal = document.getElementById('btn-nuevo-grupo-global');
+if (btnNuevoGrupoGlobal) {
+    btnNuevoGrupoGlobal.addEventListener('click', () => {
+        openModal('Nuevo Grupo', `
+            <form id="form-nuevo-grupo-global">
+                <label>Nombre del grupo</label>
+                <input type="text" name="nombre" required placeholder="Ej: Grupo 01">
+                <!-- Se eliminó el campo de horario -->
                 <div class="modal-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Guardar</button>
+                    <button type="submit" class="btn btn-primary">Crear</button>
                 </div>
             </form>
         `);
-
-        document.getElementById('form-asignar-materias-grupo').onsubmit = async e => {
+        
+        // Asignamos el evento de submit inmediatamente después de crear el modal
+        const form = document.getElementById('form-nuevo-grupo-global');
+        form.onsubmit = async e => {
             e.preventDefault();
             const fd = new FormData(e.target);
-            const materiasSeleccionadas = fd.getAll('materias').map(Number);
-            
-            toast('⏳ Actualizando...');
             try {
-                // Quitar todas las asignaciones actuales de este grupo
-                for (const m of grupo.materias) {
-                    await api(`/api/grupos/${grupoId}/materias/${m.id}`, { method: 'DELETE' }).catch(() => {});
-                }
-                // Agregar las nuevas
-                for (const mId of materiasSeleccionadas) {
-                    await api(`/api/grupos/${grupoId}/materias`, {
-                        method: 'POST',
-                        body: JSON.stringify({ materia_id: mId })
-                    }).catch(() => {});
-                }
+                await api('/api/grupos', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        nombre: fd.get('nombre'),
+                        horario: "" // Enviamos vacío para cumplir con el backend sin mostrarlo
+                    }),
+                });
                 closeModal();
-                toast('✅ Asignaciones actualizadas');
-                verDetalleGrupo(grupoId, grupo.nombre); // Recargar modal
+                toast('✅ Grupo creado exitosamente');
+                cargarVistaGrupos(); // Recargar la lista inmediatamente
             } catch (err) {
-                toast('Error: ' + err.message);
+                toast('❌ Error al crear grupo: ' + err.message);
             }
         };
+    });
+} else {
+    console.error("⚠️ No se encontró el botón 'btn-nuevo-grupo-global' en el HTML");
+}
+
+// Función para expandir/colapsar y cargar detalles en línea
+async function toggleDetalleGrupo(grupoId, nombreGrupo) {
+    const cont = document.getElementById(`detalle-grupo-${grupoId}`);
+    const btn = document.querySelector(`button[onclick^="toggleDetalleGrupo(${grupoId}"]`);
+    
+    if (cont.style.display !== 'none') {
+        cont.style.display = 'none';
+        cont.innerHTML = '';
+        if (btn) btn.innerHTML = '👥 Ver alumnos';
+        return;
+    }
+    
+    cont.style.display = 'block';
+    if (btn) btn.innerHTML = '🔼 Ocultar alumnos';
+    cont.innerHTML = '<p style="color:var(--text-soft)">Cargando...</p>';
+    
+    try {
+        const grupo = await api(`/api/grupos/${grupoId}`);
+        renderizarContenidoDetalle(grupoId, grupo);
     } catch (err) {
-        toast('Error: ' + err.message);
+        cont.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
     }
 }
 
-// 8. Funciones de Alumnos (sin cambios mayores, solo adaptadas)
+// Función auxiliar para renderizar el contenido (2/3 Alumnos, 1/3 Materias)
+function renderizarContenidoDetalle(grupoId, grupo) {
+    const cont = document.getElementById(`detalle-grupo-${grupoId}`);
+    const nombreGrupo = grupo.nombre;
+
+    // 1. ORDENAR ALUMNOS ALFABÉTICAMENTE
+    const alumnosOrdenados = [...(grupo.alumnos || [])].sort((a, b) => 
+        a.nombre_completo.localeCompare(b.nombre_completo, 'es', { sensitivity: 'base' })
+    );
+
+    // 2. Renderizar Materias (1/3 del ancho)
+    let materiasHtml = '<p style="color:var(--text-soft); font-size:13px;">Sin materias asignadas.</p>';
+    if (grupo.materias && grupo.materias.length > 0) {
+        materiasHtml = `<div style="display:flex; flex-direction:column; gap:8px;">` + 
+            grupo.materias.map(m => `<span style="background:var(--bg-soft); padding:6px 10px; border-radius:8px; font-size:13px; border:1px solid var(--border);">📚 ${m.nombre} <small>(${m.clave})</small></span>`).join('') + 
+            `</div>`;
+    }
+
+    // 3. Renderizar Alumnos (2/3 del ancho)
+    let alumnosHtml = '<p style="color:var(--text-soft); font-size:13px;">Sin alumnos registrados.</p>';
+    if (alumnosOrdenados.length > 0) {
+        alumnosHtml = `
+            <div class="table-wrap" style="margin-top:10px; max-height: 400px; overflow-y: auto;">
+                <table>
+                    <thead><tr><th>Matrícula</th><th>Nombre</th><th></th></tr></thead>
+                    <tbody>
+                        ${alumnosOrdenados.map(a => `
+                            <tr>
+                                <td>${a.matricula}</td>
+                                <td>${a.nombre_completo}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-secondary" onclick="verQRAlumno(${a.id})">QR</button>
+                                    <button class="btn btn-sm btn-danger" onclick="eliminarAlumno(${a.id}, ${grupoId})">×</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    // 4. ESTRUCTURA DE GRID: 2/3 para Alumnos, 1/3 para Materias
+    cont.innerHTML = `
+        <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px;">
+            <div>
+                <h4 style="margin-bottom:10px; font-size:15px;">👥 Alumnos (${alumnosOrdenados.length})</h4>
+                ${alumnosHtml}
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <button class="btn btn-sm btn-primary" onclick="nuevoAlumno(${grupoId})">+ Alumno</button>
+                    <button class="btn btn-sm btn-secondary" onclick="nuevoAlumnoMasivo(${grupoId})">+ Varios</button>
+                </div>
+            </div>
+            <div>
+                <h4 style="margin-bottom:10px; font-size:15px;">📚 Materias (${grupo.materias ? grupo.materias.length : 0})</h4>
+                ${materiasHtml}
+                <button class="btn btn-sm btn-primary" style="margin-top:15px; width:100%;" onclick="asignarMateriasAGrupo(${grupoId}, '${nombreGrupo.replace(/'/g, "\\'")}')">+ Asignar Materia</button>
+            </div>
+        </div>
+    `;
+}
+
+// 7. Funciones de Alumnos (adaptadas para refrescar la vista en línea)
 function nuevoAlumno(grupoId) {
     openModal('Nuevo alumno', `
         <form id="form-nuevo-alumno">
@@ -626,7 +601,13 @@ function nuevoAlumno(grupoId) {
             });
             closeModal();
             toast('Alumno creado');
-            verDetalleGrupo(grupoId, 'Grupo'); // Recargar
+            
+            // Refrescar la vista en línea si está abierta
+            const cont = document.getElementById(`detalle-grupo-${grupoId}`);
+            if (cont && cont.style.display !== 'none') {
+                cont.innerHTML = '<p style="color:var(--text-soft)">Actualizando...</p>';
+                api(`/api/grupos/${grupoId}`).then(grupo => renderizarContenidoDetalle(grupoId, grupo));
+            }
         } catch (err) {
             toast('Error: ' + err.message);
         }
@@ -665,7 +646,13 @@ function nuevoAlumnoMasivo(grupoId) {
             });
             closeModal();
             toast(`${alumnos.length} alumnos procesados`);
-            verDetalleGrupo(grupoId, 'Grupo');
+            
+            // Refrescar la vista en línea si está abierta
+            const cont = document.getElementById(`detalle-grupo-${grupoId}`);
+            if (cont && cont.style.display !== 'none') {
+                cont.innerHTML = '<p style="color:var(--text-soft)">Actualizando...</p>';
+                api(`/api/grupos/${grupoId}`).then(grupo => renderizarContenidoDetalle(grupoId, grupo));
+            }
         } catch (err) {
             toast('Error: ' + err.message);
         }
@@ -677,7 +664,70 @@ async function eliminarAlumno(id, grupoId) {
     try {
         await api(`/api/alumnos/${id}`, { method: 'DELETE' });
         toast('Alumno eliminado');
-        verDetalleGrupo(grupoId, 'Grupo');
+        
+        // Refrescar la vista en línea si está abierta
+        const cont = document.getElementById(`detalle-grupo-${grupoId}`);
+        if (cont && cont.style.display !== 'none') {
+            cont.innerHTML = '<p style="color:var(--text-soft)">Actualizando...</p>';
+            api(`/api/grupos/${grupoId}`).then(grupo => renderizarContenidoDetalle(grupoId, grupo));
+        }
+    } catch (err) {
+        toast('Error: ' + err.message);
+    }
+}
+
+// Función para asignar materias (sigue usando modal para el formulario, pero el resultado se ve en línea)
+async function asignarMateriasAGrupo(grupoId, nombreGrupo) {
+    try {
+        const materias = await api('/api/materias');
+        const grupo = await api(`/api/grupos/${grupoId}`);
+        const idsAsignadas = new Set(grupo.materias.map(m => m.id));
+
+        const opciones = materias.map(m => {
+            const isChecked = idsAsignadas.has(m.id) ? 'checked' : '';
+            return `<label style="display:flex; align-items:center; gap:8px; margin:8px 0; font-weight:normal; text-transform:none;">
+                <input type="checkbox" name="materias" value="${m.id}" ${isChecked}> ${m.nombre} (${m.clave})
+            </label>`;
+        }).join('');
+
+        openModal('Asignar materias a: ' + nombreGrupo, `
+            <form id="form-asignar-materias-grupo">
+                <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 8px;">
+                    ${opciones || '<p style="color:var(--text-soft)">No hay materias creadas.</p>'}
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        `);
+
+        document.getElementById('form-asignar-materias-grupo').onsubmit = async e => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const materiasSeleccionadas = fd.getAll('materias').map(Number);
+            
+            toast('⏳ Actualizando...');
+            try {
+                for (const m of grupo.materias) {
+                    await api(`/api/grupos/${grupoId}/materias/${m.id}`, { method: 'DELETE' }).catch(() => {});
+                }
+                for (const mId of materiasSeleccionadas) {
+                    await api(`/api/grupos/${grupoId}/materias`, {
+                        method: 'POST',
+                        body: JSON.stringify({ materia_id: mId })
+                    }).catch(() => {});
+                }
+                closeModal();
+                toast('✅ Asignaciones actualizadas');
+                
+                // Refrescar la vista en línea inmediatamente
+                const grupoActualizado = await api(`/api/grupos/${grupoId}`);
+                renderizarContenidoDetalle(grupoId, grupoActualizado);
+            } catch (err) {
+                toast('Error: ' + err.message);
+            }
+        };
     } catch (err) {
         toast('Error: ' + err.message);
     }
