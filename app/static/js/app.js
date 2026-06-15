@@ -10,7 +10,7 @@ const state = {
 
 // ============ API HELPER (Con lectura de error del backend) ============
 async function api(path, options = {}) {
-    if (path.endsWith('/') && path.length > 1) {
+    if (hpat.endsWith('/') && path.length > 1) {
         path = path.slice(0, -1);
     }
     
