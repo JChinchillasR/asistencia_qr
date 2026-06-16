@@ -6,21 +6,19 @@ class Asistencia(Base):
     __tablename__ = "asistencias"
 
     id = Column(Integer, primary_key=True, index=True)
-    alumno_id = Column(Integer, ForeignKey("alumnos.id"), nullable=False)
-    materia_id = Column(Integer, ForeignKey("materias.id"), nullable=False)
-    grupo_id = Column(Integer, ForeignKey("grupos.id"), nullable=False)
-    profesor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    alumno_id = Column(Integer, ForeignKey("alumnos.id", ondelete="CASCADE"), nullable=False)
+    materia_id = Column(Integer, ForeignKey("materias.id", ondelete="CASCADE"), nullable=False)
+    grupo_id = Column(Integer, ForeignKey("grupos.id", ondelete="CASCADE"), nullable=False)
+    profesor_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
-    # 🆕 NUEVO: Campo para guardar el horario específico
-    horario_materia_id = Column(Integer, ForeignKey("horarios_materia.id"), nullable=True)
+    # 🎯 CORRECCIÓN: ondelete="SET NULL" permite borrar el horario sin borrar la asistencia
+    horario_materia_id = Column(Integer, ForeignKey("horarios_materia.id", ondelete="SET NULL"), nullable=True)
     
     fecha = Column(Date, nullable=False)
     hora_entrada = Column(Time, nullable=False)
     estatus = Column(String, default="Presente")
 
-    # 🎯 CORRECCIÓN: 
-    # Usamos back_populates para alumno (porque Alumno ya tiene 'asistencias' definido).
-    # Usamos backref con nombres únicos para los demás para evitar CUALQUIER otro conflicto.
+    # Relaciones
     alumno = relationship("Alumno", back_populates="asistencias")
     materia = relationship("Materia", backref="asistencias_materia")
     grupo = relationship("Grupo", backref="asistencias_grupo")

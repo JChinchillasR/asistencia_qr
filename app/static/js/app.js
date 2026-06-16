@@ -296,31 +296,77 @@ async function toggleDetalleMateria(materiaId, materiaNombre) {
 async function editarMateria(id) {
     try {
         const m = state.materias.find(mat => mat.id === id);
-        if (!m) return;
-        const horariosTexto = m.horarios.map(h => h.descripcion).join('\n');
+        if (!m) {
+            toast('⚠️ Materia no encontrada');
+            return;
+        }
+
+        const horariosTexto = m.horarios && m.horarios.length > 0 
+            ? m.horarios.map(h => h.descripcion).join('\n') 
+            : '';
+
         openModal(`Editar materia: <strong>${m.nombre}</strong>`, `
             <form id="form-editar-materia">
-                <label style="font-size:15px; font-weight:600;">Nombre</label><input type="text" name="nombre" value="${m.nombre}" required style="font-size:15px; padding:10px; width:100%;">
-                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Clave</label><input type="text" name="clave" value="${m.clave}" required style="font-size:15px; padding:10px; width:100%;">
-                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Semestre</label><input type="text" name="semestre" value="${m.semestre}" required style="font-size:15px; padding:10px; width:100%;">
-                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Horarios (uno por línea)</label><textarea name="horarios" rows="3" style="font-size:15px; padding:10px; width:100%; font-family:inherit;">${horariosTexto}</textarea>
+                <label style="font-size:15px; font-weight:600;">Nombre de la materia</label>
+                <input type="text" name="nombre" value="${m.nombre}" required style="font-size:15px; padding:10px; width:100%;">
+                
+                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Clave</label>
+                <input type="text" name="clave" value="${m.clave}" required style="font-size:15px; padding:10px; width:100%;">
+                
+                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Semestre</label>
+                <input type="text" name="semestre" value="${m.semestre}" required style="font-size:15px; padding:10px; width:100%;">
+                
+                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Horarios (uno por línea, ej: Lunes 10:00 - 12:00)</label>
+                <textarea name="horarios" rows="3" style="font-size:15px; padding:10px; width:100%; font-family:inherit;">${horariosTexto}</textarea>
+                
                 <div class="modal-actions" style="margin-top:20px;">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()" style="font-size:15px; padding:10px 20px;">Cancelar</button>
-                    <button type="submit" class="btn btn-primary" style="font-size:15px; padding:10px 20px;">Guardar</button>
+                    <button type="submit" class="btn btn-primary" style="font-size:15px; padding:10px 20px;">Guardar Cambios</button>
                 </div>
-            </form>`);
-        document.getElementById('form-editar-materia').onsubmit = async e => {
-            e.preventDefault();
-            const fd = new FormData(e.target);
-            const horariosArray = fd.get('horarios').split('\n').map(h => h.trim()).filter(h => h.length > 0);
-            try {
-                await api(`/api/materias/${id}`, { method: 'PUT', body: JSON.stringify({ nombre: fd.get('nombre'), clave: fd.get('clave'), semestre: fd.get('semestre'), horarios: horariosArray }) });
-                closeModal(); toast('✅ Materia actualizada'); cargarMaterias(); cargarMateriasSelects();
-            } catch (err) { toast('❌ Error: ' + err.message); }
-        };
-    } catch (err) { toast('❌ Error: ' + err.message); }
-}
+            </form>
+        `);
 
+        // 🎯 Asignamos el evento de forma segura
+        const form = document.getElementById('form-editar-materia');
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            const fd = new FormData(form);
+            
+            // Procesar horarios de forma segura (evita errores si está vacío)
+            const rawHorarios = fd.get('horarios') || '';
+            const horariosArray = rawHorarios.split('\n').map(h => h.trim()).filter(h => h.length > 0);
+
+            console.log("📤 Enviando datos de edición:", {
+                nombre: fd.get('nombre'),
+                clave: fd.get('clave'),
+                semestre: fd.get('semestre'),
+                horarios: horariosArray
+            });
+
+            try {
+                await api(`/api/materias/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        nombre: fd.get('nombre'),
+                        clave: fd.get('clave'),
+                        semestre: fd.get('semestre'),
+                        horarios: horariosArray
+                    }),
+                });
+                closeModal();
+                toast('✅ Materia actualizada correctamente');
+                cargarMaterias();
+                cargarMateriasSelects();
+            } catch (err) {
+                console.error("❌ Error al editar materia:", err);
+                toast('❌ Error: ' + err.message);
+            }
+        };
+    } catch (err) {
+        console.error("❌ Error cargando datos para editar:", err);
+        toast('❌ Error al cargar datos: ' + err.message);
+    }
+}
 async function asignarGruposAMateria(materiaId, materiaNombre) {
     try {
         const materia = state.materias.find(m => m.id === parseInt(materiaId));
