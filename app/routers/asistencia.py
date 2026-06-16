@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.models.materia import Materia
+from app.models.materia import Materia, HorarioMateria
 from app.models.alumno import Alumno
+from app.models.grupo import Grupo
 from app.models.asistencia import Asistencia
 from app.schemas.asistencia import RegistroQR, AsistenciaRespuesta
 
@@ -31,16 +31,17 @@ def registrar(
         # 1. Validar materia
         materia = db.query(Materia).filter(Materia.id == payload.materia_id).first()
         if not materia:
-            print(f"❌ ERROR: Materia ID {payload.materia_id} no encontrada")
             raise HTTPException(404, f"Materia con ID {payload.materia_id} no encontrada")
         
         if profesor.role != "admin" and materia.profesor_id != profesor.id:
-            print(f"❌ ERROR: Profesor no autorizado para esta materia")
             raise HTTPException(403, "No autorizado para esta materia")
 
-        # 2. Buscar alumno por qr_token o matrícula
+        # 2. Buscar alumno (Cargamos sus relaciones para la validación)
         alumno = (
             db.query(Alumno)
+            .options(
+                joinedload(Alumno.grupo).joinedload(Grupo.materias_asignadas).joinedload(HorarioMateria.materia)
+            )
             .filter(
                 (Alumno.qr_token == payload.qr_token)
                 | (Alumno.matricula == payload.qr_token)
@@ -49,7 +50,6 @@ def registrar(
         )
         
         if not alumno:
-            print(f"⚠️ ADVERTENCIA: No se encontró alumno con token '{payload.qr_token}'")
             return AsistenciaRespuesta(
                 status="NO_ENCONTRADO",
                 alumno=payload.qr_token,
@@ -58,12 +58,11 @@ def registrar(
 
         print(f"✅ Alumno encontrado: {alumno.nombre_completo} (ID: {alumno.id})")
 
-        # 3. Verificar que el grupo del alumno toma esta materia (Relación N:M)
+        # 3. 🎯 NUEVA LÓGICA: Verificar que el grupo del alumno toma esta materia
         try:
-            # Verificamos si la materia está en la lista de materias del grupo del alumno
-            grupo_toma_materia = any(m.id == materia.id for m in alumno.grupo.materias)
+            # alumno.grupo.materias_asignadas es una lista de objetos HorarioMateria
+            grupo_toma_materia = any(h.materia.id == materia.id for h in alumno.grupo.materias_asignadas)
         except AttributeError:
-            # Por si el grupo fue eliminado pero el alumno quedó huérfano
             grupo_toma_materia = False
 
         if not grupo_toma_materia:
@@ -90,12 +89,11 @@ def registrar(
         )
         
         if existente:
-            print(f"⚠️ ADVERTENCIA: Asistencia duplicada para {alumno.nombre_completo}")
             return AsistenciaRespuesta(
                 status="DUPLICADO",
                 alumno=alumno.nombre_completo,
                 materia=materia.nombre,
-                grupo=alumno.grupo.nombre,
+                grupo=alumno.grupo.nombre,  # 🎯 AQUÍ ESTABA EL ERROR (,rInfo eliminado)
                 hora=existente.hora_entrada.strftime("%H:%M:%S"),
             )
 
@@ -112,10 +110,6 @@ def registrar(
         db.commit()
         
         print(f"✅ ASISTENCIA REGISTRADA EXITOSAMENTE")
-        print(f"Alumno: {alumno.nombre_completo}")
-        print(f"Materia: {materia.nombre}")
-        print(f"Grupo: {alumno.grupo.nombre}")
-        print(f"Hora: {hora.strftime('%H:%M:%S')}")
         
         return AsistenciaRespuesta(
             status="REGISTRO_NUEVO",
@@ -126,10 +120,8 @@ def registrar(
         )
         
     except HTTPException:
-        # Re-lanzar excepciones HTTP (404, 403, etc.)
         raise
     except Exception as e:
-        # Capturar cualquier otro error y mostrarlo en consola
         print(f"\n{'='*60}")
         print(f"❌ ERROR INESPERADO EN REGISTRO DE ASISTENCIA")
         print(f"Tipo de error: {type(e).__name__}")
@@ -137,8 +129,4 @@ def registrar(
         print(f"{'='*60}\n")
         import traceback
         traceback.print_exc()
-        
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error interno: {type(e).__name__} - {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error interno: {type(e).__name__} - {str(e)}")

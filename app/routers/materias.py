@@ -64,7 +64,8 @@ def editar_materia(
         # Crear los nuevos
         for h_desc in payload.horarios:
             if h_desc and h_desc.strip():
-                db.add(HorarioMateria(materia_id=materia.id, descripcion=h_desc.strip()))
+                # 🎯 AQUÍ ESTABA EL ERROR: Cambiado de 'materia.id' a 'm.id'
+                db.add(HorarioMateria(materia_id=m.id, descripcion=h_desc.strip()))
             
     db.commit()
     db.refresh(m)
