@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
-from datetime import datetime
+from datetime import datetime, timedelta  # 🎯 Se agregó 'timedelta' aquí
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.dependencies import get_current_user
@@ -21,112 +21,113 @@ def registrar(
     profesor: User = Depends(get_current_user),
 ):
     try:
-        print(f"\n{'='*60}")
-        print(f"📡 RECIBIENDO ESCANEO QR")
-        print(f"Token recibido: '{payload.qr_token}'")
-        print(f"Materia ID: {payload.materia_id}")
-        print(f"Profesor: {profesor.full_name}")
-        print(f"{'='*60}\n")
-
-        # 1. Validar materia
         materia = db.query(Materia).filter(Materia.id == payload.materia_id).first()
-        if not materia:
-            raise HTTPException(404, f"Materia con ID {payload.materia_id} no encontrada")
-        
-        if profesor.role != "admin" and materia.profesor_id != profesor.id:
-            raise HTTPException(403, "No autorizado para esta materia")
+        if not materia or (profesor.role != "admin" and materia.profesor_id != profesor.id):
+            raise HTTPException(403, "No autorizado")
 
-        # 2. Buscar alumno (Cargamos sus relaciones para la validación)
-        alumno = (
-            db.query(Alumno)
-            .options(
-                joinedload(Alumno.grupo).joinedload(Grupo.materias_asignadas).joinedload(HorarioMateria.materia)
-            )
-            .filter(
-                (Alumno.qr_token == payload.qr_token)
-                | (Alumno.matricula == payload.qr_token)
-            )
-            .first()
-        )
+        alumno = db.query(Alumno).options(joinedload(Alumno.grupo).joinedload(Grupo.materias_asignadas)).filter(
+            (Alumno.qr_token == payload.qr_token) | (Alumno.matricula == payload.qr_token)
+        ).first()
         
         if not alumno:
-            return AsistenciaRespuesta(
-                status="NO_ENCONTRADO",
-                alumno=payload.qr_token,
-                materia=materia.nombre,
-            )
+            return AsistenciaRespuesta(status="NO_ENCONTRADO", alumno=payload.qr_token, materia=materia.nombre)
 
-        print(f"✅ Alumno encontrado: {alumno.nombre_completo} (ID: {alumno.id})")
+        # Validar que el grupo tome esta materia en este horario
+        asignaciones = [h for h in alumno.grupo.materias_asignadas if h.materia.id == materia.id]
+        if not any(h.id == payload.horario_materia_id for h in asignaciones):
+            return AsistenciaRespuesta(status="ERROR_GRUPO", alumno=alumno.nombre_completo, materia=materia.nombre, horario_descripcion="Este grupo no está asignado a este horario.")
 
-        # 3. 🎯 NUEVA LÓGICA: Verificar que el grupo del alumno toma esta materia
-        try:
-            # alumno.grupo.materias_asignadas es una lista de objetos HorarioMateria
-            grupo_toma_materia = any(h.materia.id == materia.id for h in alumno.grupo.materias_asignadas)
-        except AttributeError:
-            grupo_toma_materia = False
-
-        if not grupo_toma_materia:
-            print(f"⚠️ ADVERTENCIA: El grupo '{alumno.grupo.nombre}' del alumno no toma esta materia")
-            return AsistenciaRespuesta(
-                status="NO_ENCONTRADO",
-                alumno=alumno.nombre_completo,
-                materia=materia.nombre,
-            )
-
-        # 4. Registrar asistencia
+        horario_obj = next((h for h in asignaciones if h.id == payload.horario_materia_id), None)
+        horario_desc = horario_obj.descripcion if horario_obj else "Sin horario"
+        
         ahora = datetime.now(settings.tz)
         hoy = ahora.date()
-        hora = ahora.time()
+        hora_actual = ahora.time()
 
-        existente = (
-            db.query(Asistencia)
-            .filter(
-                Asistencia.alumno_id == alumno.id,
-                Asistencia.materia_id == materia.id,
-                Asistencia.fecha == hoy,
-            )
-            .first()
-        )
+        # 🎯 LÓGICA DE ESTATUS: PRESENTE vs RETARDO (Blindado con zona horaria)
+        estatus_final = "Presente"
+        if horario_obj and horario_obj.hora_inicio:
+            # Crear un datetime consciente de la zona horaria para la comparación
+            inicio_dt = datetime.combine(hoy, horario_obj.hora_inicio, tzinfo=ahora.tzinfo)
+            limite_retardo = inicio_dt + timedelta(minutes=15)
+            
+            if ahora > limite_retardo:
+                estatus_final = "Retardo"
+
+        # Verificar duplicado
+        existente = db.query(Asistencia).filter(
+            Asistencia.alumno_id == alumno.id,
+            Asistencia.materia_id == materia.id,
+            Asistencia.fecha == hoy
+        ).first()
         
         if existente:
             return AsistenciaRespuesta(
-                status="DUPLICADO",
-                alumno=alumno.nombre_completo,
-                materia=materia.nombre,
-                grupo=alumno.grupo.nombre,  # 🎯 AQUÍ ESTABA EL ERROR (,rInfo eliminado)
-                hora=existente.hora_entrada.strftime("%H:%M:%S"),
+                status="DUPLICADO", alumno=alumno.nombre_completo, materia=materia.nombre,
+                grupo=alumno.grupo.nombre, hora=existente.hora_entrada.strftime("%H:%M:%S"),
+                estatus=existente.estatus, horario_descripcion=horario_desc
             )
 
+        # Guardar nuevo registro
         registro = Asistencia(
-            alumno_id=alumno.id,
-            materia_id=materia.id,
-            grupo_id=alumno.grupo_id,
-            profesor_id=profesor.id,
-            fecha=hoy,
-            hora_entrada=hora,
-            estatus="Presente",
+            alumno_id=alumno.id, materia_id=materia.id, grupo_id=alumno.grupo_id,
+            profesor_id=profesor.id, fecha=hoy, hora_entrada=hora_actual,
+            estatus=estatus_final, horario_materia_id=payload.horario_materia_id
         )
         db.add(registro)
         db.commit()
         
-        print(f"✅ ASISTENCIA REGISTRADA EXITOSAMENTE")
-        
         return AsistenciaRespuesta(
-            status="REGISTRO_NUEVO",
-            alumno=alumno.nombre_completo,
-            materia=materia.nombre,
-            grupo=alumno.grupo.nombre,
-            hora=hora.strftime("%H:%M:%S"),
+            status="REGISTRO_NUEVO", alumno=alumno.nombre_completo, materia=materia.nombre,
+            grupo=alumno.grupo.nombre, hora=hora_actual.strftime("%H:%M:%S"),
+            estatus=estatus_final, horario_descripcion=horario_desc
         )
-        
     except HTTPException:
         raise
     except Exception as e:
-        print(f"\n{'='*60}")
-        print(f"❌ ERROR INESPERADO EN REGISTRO DE ASISTENCIA")
-        print(f"Tipo de error: {type(e).__name__}")
-        print(f"Mensaje: {str(e)}")
-        print(f"{'='*60}\n")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error interno: {type(e).__name__} - {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    # ============ FINALIZAR LISTA (MARCAR AUSENTES) ============
+@router.post("/finalizar")
+def finalizar_lista(
+    materia_id: int,
+    horario_materia_id: int,
+    grupo_id: int,
+    db: Session = Depends(get_db),
+    profesor: User = Depends(get_current_user),
+):
+    # 1. Validar permisos
+    materia = db.query(Materia).filter(Materia.id == materia_id).first()
+    if not materia or (profesor.role != "admin" and materia.profesor_id != profesor.id):
+        raise HTTPException(403, "No autorizado")
+
+    # 2. Obtener todos los alumnos del grupo
+    alumnos_grupo = db.query(Alumno).filter(Alumno.grupo_id == grupo_id).all()
+    
+    # 3. Obtener los que YA tienen asistencia hoy para esta materia
+    hoy = datetime.now(settings.tz).date()
+    alumnos_presentes = db.query(Asistencia.alumno_id).filter(
+        Asistencia.materia_id == materia_id,
+        Asistencia.fecha == hoy
+    ).all()
+    presentes_ids = {row[0] for row in alumnos_presentes}
+
+    # 4. Marcar como Ausente a los que faltan
+    count_ausentes = 0
+    for alumno in alumnos_grupo:
+        if alumno.id not in presentes_ids:
+            registro = Asistencia(
+                alumno_id=alumno.id,
+                materia_id=materia_id,
+                grupo_id=grupo_id,
+                profesor_id=profesor.id,
+                fecha=hoy,
+                hora_entrada=datetime.now(settings.tz).time(),
+                estatus="Ausente",
+                horario_materia_id=horario_materia_id
+            )
+            db.add(registro)
+            count_ausentes += 1
+    
+    db.commit()
+    return {"ok": True, "ausentes_registrados": count_ausentes}

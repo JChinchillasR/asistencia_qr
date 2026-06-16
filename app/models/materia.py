@@ -1,14 +1,17 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Time  # 🎯 Se agregó 'Time' aquí
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
+
 
 class HorarioMateria(Base):
     __tablename__ = "horarios_materia"
     
     id = Column(Integer, primary_key=True, index=True)
     materia_id = Column(Integer, ForeignKey("materias.id", ondelete="CASCADE"), nullable=False)
-    descripcion = Column(String, nullable=False)
+    descripcion = Column(String, nullable=False) # Ej: "Lunes y Miércoles"
+    hora_inicio = Column(Time, nullable=True)    # 🆕 NUEVO: Para calcular retardos
+    hora_fin = Column(Time, nullable=True)       # 🆕 NUEVO: Para calcular ausentes
     
     materia = relationship("Materia", back_populates="horarios")
     grupos = relationship("Grupo", secondary="asignaciones_grupo_horario", back_populates="materias_asignadas")

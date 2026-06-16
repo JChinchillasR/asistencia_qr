@@ -138,6 +138,26 @@ def listar_grupos_de_materia(
     return grupos
 
 
+# ============ OBTENER GRUPOS POR HORARIO ESPECÍFICO ============
+@router.get("/horario/{horario_id}")
+def listar_grupos_por_horario(
+    horario_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    # 1. Buscar todas las asignaciones de este horario
+    asignaciones = db.query(AsignacionGrupoHorario).filter(
+        AsignacionGrupoHorario.horario_materia_id == horario_id
+    ).all()
+    
+    grupo_ids = [a.grupo_id for a in asignaciones]
+    
+    if not grupo_ids:
+        return []
+        
+    # 2. Devolver solo los grupos que tienen ese horario asignado
+    return db.query(Grupo).filter(Grupo.id.in_(grupo_ids)).order_by(Grupo.nombre).all()
+
 # ============ ASIGNACIÓN DE HORARIOS A GRUPOS ============
 
 @router.post("/{grupo_id}/asignar-horario")

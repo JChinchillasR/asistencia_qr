@@ -166,32 +166,76 @@ async function actualizarInfoGrupoActiva() {
     const materiaId = document.getElementById('sel-materia-activa').value;
     const info = document.getElementById('info-grupo-activa');
     if (!materiaId) { info.innerHTML = ''; return; }
+    
     try {
         const materia = state.materias.find(m => m.id === parseInt(materiaId));
         if (!materia) return;
-        const asignaciones = await api(`/api/materias/${materiaId}/asignaciones`);
-        const todosLosGrupos = await api('/api/grupos');
+
         let html = `<div style="margin-top: 15px; padding: 15px; background: var(--bg-soft, #f8f9fa); border-radius: 8px; border: 1px solid var(--border);">`;
         html += `<strong style="color: var(--primary, #007bff); font-size: 15px;">📚 ${materia.nombre}</strong><br>`;
+        
         if (materia.horarios && materia.horarios.length > 0) {
-            html += `<div style="margin-top: 12px; display: flex; flex-direction: column; gap: 10px;">`;
+            // 1. Selector de Horario
+            html += `<label style="display:block; margin-top:12px; font-weight:600; font-size:14px;">1. Selecciona el horario:</label>`;
+            html += `<select id="sel-horario-activa" onchange="cargarGruposDeHorario()" style="width:100%; padding:10px; margin-top:6px; border-radius:6px; border:1px solid var(--border); font-size:14px; background:white;">`;
+            html += `<option value="">-- Elige un horario --</option>`;
             materia.horarios.forEach(h => {
-                const gruposEnEsteHorario = asignaciones.filter(a => a.horario_materia_id === h.id).map(a => {
-                    const g = todosLosGrupos.find(gr => gr.id === a.grupo_id);
-                    return g ? g.nombre : 'Grupo desconocido';
-                });
-                const gruposText = gruposEnEsteHorario.length > 0 ? gruposEnEsteHorario.join(', ') : '<span style="color:var(--text-soft); font-style:italic;">Sin grupos asignados</span>';
-                html += `<div style="background: white; padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border); font-size: 14px;">
-                    <div style="font-weight: 600; color: var(--primary, #007bff); margin-bottom: 4px;">🕒 ${h.descripcion}</div>
-                    <div style="color: var(--text, #333);">👥 <strong>Grupos:</strong> ${gruposText}</div></div>`;
+                const horaTxt = h.hora_inicio ? ` (${h.hora_inicio} - ${h.hora_fin || 'Fin'})` : '';
+                html += `<option value="${h.id}">${h.descripcion}${horaTxt}</option>`;
             });
-            html += `</div>`;
+            html += `</select>`;
+
+            // 2. Selector de Grupo (se llena dinámicamente)
+            html += `<label style="display:block; margin-top:12px; font-weight:600; font-size:14px;">2. Selecciona el grupo:</label>`;
+            html += `<select id="sel-grupo-activa" style="width:100%; padding:10px; margin-top:6px; border-radius:6px; border:1px solid var(--border); font-size:14px; background:white;" disabled>`;
+            html += `<option value="">-- Primero elige un horario --</option>`;
+            html += `</select>`;
         } else {
             html += `<div style="color: var(--text-soft); margin-top: 10px; font-size: 14px;">⚠️ Esta materia no tiene horarios definidos.</div>`;
         }
+        
+        // 🆕 AGREGAR BOTÓN DE FINALIZAR LISTA
+        html += `<button id="btn-finalizar-lista" class="btn btn-primary" style="width:100%; margin-top:15px; padding:12px; font-weight:600;" onclick="finalizarLista()">✅ Finalizar Lista (Marcar Ausentes)</button>`;
+        
         html += `</div>`;
         info.innerHTML = html;
-    } catch (err) { info.innerHTML = `<p class="alert alert-error" style="margin-top:10px;">Error: ${err.message}</p>`; }
+        
+    } catch (err) { 
+        info.innerHTML = `<p class="alert alert-error">Error: ${err.message}</p>`; 
+    }
+}
+
+// 🆕 FUNCIÓN MEJORADA: Cargar grupos cuando se elige un horario
+async function cargarGruposDeHorario() {
+    const horarioId = document.getElementById('sel-horario-activa').value;
+    const selGrupo = document.getElementById('sel-grupo-activa');
+    
+    if (!horarioId) {
+        selGrupo.innerHTML = '<option value="">-- Primero elige un horario --</option>';
+        selGrupo.disabled = true;
+        return;
+    }
+
+    selGrupo.innerHTML = '<option value="">Cargando grupos...</option>';
+    selGrupo.disabled = true;
+
+    try {
+        // 🎯 NUEVO: Usar el endpoint específico para obtener grupos de este horario
+        const gruposEnHorario = await api(`/api/grupos/horario/${horarioId}`);
+
+        selGrupo.innerHTML = '<option value="">-- Selecciona el grupo --</option>';
+        if (gruposEnHorario && gruposEnHorario.length > 0) {
+            gruposEnHorario.forEach(g => {
+                selGrupo.innerHTML += `<option value="${g.id}">${g.nombre}</option>`;
+            });
+            selGrupo.disabled = false;
+        } else {
+            selGrupo.innerHTML = '<option value="">No hay grupos asignados a este horario</option>';
+        }
+    } catch (err) {
+        selGrupo.innerHTML = '<option value="">Error al cargar</option>';
+        console.error("Error cargando grupos:", err);
+    }
 }
 
 async function cargarMaterias() {
@@ -581,20 +625,46 @@ async function onScanSuccess(decodedText) {
     const ahora = Date.now();
     if (decodedText === state.ultimoScan.codigo && (ahora - state.ultimoScan.tiempo) < 4000) return;
     state.ultimoScan = { codigo: decodedText, tiempo: ahora };
+    
     const materiaId = document.getElementById('sel-materia-activa').value;
+    const horarioId = document.getElementById('sel-horario-activa')?.value || null;
+    const grupoId = document.getElementById('sel-grupo-activa')?.value || null; // 🆕 NUEVO
+    
+    if (!horarioId || !grupoId) {
+        toast('⚠️ Debes seleccionar el Horario y el Grupo antes de escanear.');
+        return;
+    }
+
     const resDiv = document.getElementById('resultado-escaneo');
     resDiv.classList.remove('oculto', 'success', 'warning', 'error');
     resDiv.innerHTML = '⏳ Procesando...';
+
     try {
-        const data = await api('/api/asistencia/registrar', { method: 'POST', body: JSON.stringify({ qr_token: decodedText.trim(), materia_id: parseInt(materiaId) }) });
+        const data = await api('/api/asistencia/registrar', {
+            method: 'POST',
+            body: JSON.stringify({ 
+                qr_token: decodedText.trim(), 
+                materia_id: parseInt(materiaId),
+                horario_materia_id: parseInt(horarioId)
+            }),
+        });
+
+        const horarioTxt = data.horario_descripcion ? `<br><small style="color:var(--text-soft)">🕒 ${data.horario_descripcion}</small>` : '';
+        const estatusBadge = data.estatus === 'Retardo' 
+            ? `<span style="color:#f59e0b; font-weight:bold;">⚠️ RETARDO</span>` 
+            : `<span style="color:#10b981; font-weight:bold;">✅ PRESENTE</span>`;
+
         if (data.status === 'REGISTRO_NUEVO') {
             resDiv.classList.add('success');
-            resDiv.innerHTML = `✅ <strong>${data.materia}</strong><br>${data.alumno} · ${data.grupo} · ${data.hora}`;
-            hablar(`${obtenerSaludo(data.alumno)}. Registrado en ${data.materia}`);
+            resDiv.innerHTML = `${estatusBadge}<br><strong>${data.alumno}</strong> · ${data.grupo}<br><small>${data.hora}</small>${horarioTxt}`;
+            hablar(`${obtenerSaludo(data.alumno)}. ${data.estatus === 'Retardo' ? 'Llegó con retardo' : 'Registrado como presente'}`);
         } else if (data.status === 'DUPLICADO') {
             resDiv.classList.add('warning');
-            resDiv.innerHTML = `⚠️ <strong>Ya registrado</strong><br>${data.alumno} ya pasó lista hoy.`;
-            hablar(`${data.alumno} ya cuenta con asistencia.`);
+            resDiv.innerHTML = `⚠️ <strong>Ya registrado</strong><br>${data.alumno} ya pasó lista (${data.estatus}).${horarioTxt}`;
+        } else if (data.status === 'ERROR_GRUPO') {
+            resDiv.classList.add('error');
+            resDiv.innerHTML = `❌ <strong>Grupo Incorrecto</strong><br>${data.horario_descripcion}`;
+            hablar(`Atención. Este alumno no pertenece a este grupo.`);
         } else {
             resDiv.classList.add('error');
             resDiv.innerHTML = `❌ <strong>No encontrado</strong><br>Token: ${data.alumno}`;
@@ -602,6 +672,32 @@ async function onScanSuccess(decodedText) {
     } catch (err) {
         resDiv.classList.add('error');
         resDiv.innerHTML = `❌ <strong>Error</strong><br>${err.message}`;
+    }
+}
+
+// ============ FINALIZAR LISTA ============
+async function finalizarLista() {
+    const materiaId = document.getElementById('sel-materia-activa').value;
+    const horarioId = document.getElementById('sel-horario-activa')?.value;
+    const grupoId = document.getElementById('sel-grupo-activa')?.value;
+
+    if (!materiaId || !horarioId || !grupoId) {
+        toast('⚠️ Debes seleccionar Materia, Horario y Grupo primero.');
+        return;
+    }
+
+    if (!confirm('¿Estás seguro de finalizar la lista?\n\nEsto marcará como "Ausente" a todos los alumnos de este grupo que no hayan escaneado su QR.')) {
+        return;
+    }
+
+    toast('⏳ Procesando ausentes...');
+    try {
+        const res = await api(`/api/asistencia/finalizar?materia_id=${materiaId}&horario_materia_id=${horarioId}&grupo_id=${grupoId}`, {
+            method: 'POST'
+        });
+        toast(`✅ Lista finalizada. Se registraron ${res.ausentes_registrados} ausentes.`);
+    } catch (err) {
+        toast('❌ Error: ' + err.message);
     }
 }
 

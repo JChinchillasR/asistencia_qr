@@ -1,19 +1,37 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, time
 
 class HorarioMateriaOut(BaseModel):
     id: int
     descripcion: str
+    hora_inicio: Optional[str] = None
+    hora_fin: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    # 🎯 TRADUCTOR: Convierte objetos 'time' de la base de datos a texto "HH:MM"
+    @field_validator('hora_inicio', 'hora_fin', mode='before')
+    @classmethod
+    def format_time(cls, v):
+        if isinstance(v, time):
+            return v.strftime("%H:%M")
+        return str(v) if v else None
+
+    model_config = {"from_attributes": True}
+
 
 class MateriaCreate(BaseModel):
     nombre: str
     clave: str
     semestre: str
-    horarios: List[str] = [] # Lista de strings, ej: ["Lun 10:00", "Mie 10:00"]
+    horarios: List[str] = []
+
+
+class MateriaUpdate(BaseModel):
+    nombre: Optional[str] = None
+    clave: Optional[str] = None
+    semestre: Optional[str] = None
+    horarios: Optional[List[str]] = None
+
 
 class MateriaOut(BaseModel):
     id: int
@@ -25,5 +43,4 @@ class MateriaOut(BaseModel):
     created_at: datetime
     horarios: List[HorarioMateriaOut] = []
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
