@@ -84,13 +84,16 @@ function obtenerNombreArchivoDesdeHeaders(response) {
 
 // ============ MODAL ============
 function openModal(title, bodyHtml) {
-    document.getElementById('modal-title').textContent = title;
+    // 🎯 Cambiamos textContent por innerHTML para que respete etiquetas como <strong>
+    document.getElementById('modal-title').innerHTML = title;
     document.getElementById('modal-body').innerHTML = bodyHtml;
     document.getElementById('modal').classList.remove('oculto');
 }
+
 function closeModal() {
     document.getElementById('modal').classList.add('oculto');
 }
+
 document.addEventListener('click', e => {
     if (e.target.classList.contains('modal-close') || e.target.id === 'modal') closeModal();
 });
@@ -241,7 +244,7 @@ function logout() {
     if (errEl) errEl.classList.add('oculto');
 }
 
-// ============ MATERIAS Y GRUPOS (NUEVO FLUJO N:M) ============
+// ============ MATERIAS ============
 
 // 1. Cargar selects para Tomar Lista y Generar QR
 async function cargarMateriasSelects() {
@@ -267,16 +270,14 @@ async function actualizarInfoGrupoActiva() {
     const info = document.getElementById('info-grupo-activa');
     if (!materiaId) { info.innerHTML = ''; return; }
     try {
-        // Usamos el endpoint que devuelve los grupos de esa materia
         const grupos = await api(`/api/grupos/materia/${materiaId}`);
-        const totalAlumnos = grupos.reduce((acc, g) => acc + (g.alumnos_count || 0), 0); // Nota: ajustaremos esto si es necesario, o contamos en frontend
         info.innerHTML = `<strong>${grupos.length}</strong> grupo(s) asignado(s) a esta materia.`;
     } catch (err) {
         info.innerHTML = '';
     }
 }
 
-// 3. Listar todas las materias (con opción de asignar grupos)
+// 3. Cargar lista de materias (CON TARJETAS MÁS GRANDES Y LEGIBLES)
 async function cargarMaterias() {
     const cont = document.getElementById('lista-materias');
     cont.innerHTML = '<p style="color:var(--text-soft)">Cargando...</p>';
@@ -286,40 +287,262 @@ async function cargarMaterias() {
             cont.innerHTML = '<p style="color:var(--text-soft)">No tienes materias. Crea la primera.</p>';
             return;
         }
-        cont.innerHTML = materias.map(m => `
-            <div class="grid-card">
-                <h3>${m.nombre}</h3>
-                <div class="meta">Clave: ${m.clave} · Semestre: ${m.semestre}</div>
-                <div class="acciones">
-                    <button class="btn btn-sm btn-primary" onclick="asignarGruposAMateria(${m.id}, '${m.nombre}')">👥 Asignar Grupos</button>
-                    <button class="btn btn-sm btn-danger" onclick="eliminarMateria(${m.id})">🗑️</button>
+        cont.innerHTML = materias.map(m => {
+            const horariosHtml = m.horarios && m.horarios.length > 0 
+                ? `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; margin-bottom: 8px;">` + 
+                  m.horarios.map(h => `<span style="background:var(--primary-light, #e3f2fd); color:var(--primary, #1976d2); padding:6px 12px; border-radius:6px; font-size:14px; font-weight:600;">🕒 ${h.descripcion}</span>`).join('') + 
+                  `</div>`
+                : `<div style="margin-top:12px; font-size:14px; color:var(--text-soft);">Sin horarios definidos</div>`;
+
+            return `
+            <div class="grid-card" style="padding: 20px; margin-bottom: 15px;">
+                <h3 style="font-size: 1.25rem; margin-bottom: 8px; color: var(--text);">${m.nombre}</h3>
+                <div class="meta" style="font-size: 0.95rem; margin-bottom: 12px; color: var(--text-soft);">
+                    Clave: <strong>${m.clave}</strong> · Semestre: <strong>${m.semestre}</strong>
+                </div>
+                ${horariosHtml}
+                <div class="acciones" style="margin-top: 16px; display:flex; gap: 10px; flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-secondary" onclick="verGruposAsignadosAMateria(${m.id}, '${m.nombre.replace(/'/g, "\\'")}')">👥 Ver grupos</button>
+                    <button class="btn btn-sm btn-primary" onclick="asignarGruposAMateria(${m.id}, '${m.nombre.replace(/'/g, "\\'")}')">⚙️ Asignar grupo</button>
+                    <button class="btn btn-sm btn-secondary" onclick="editarMateria(${m.id})">✏️ Editar</button>
+                    <button class="btn btn-sm btn-danger" onclick="eliminarMateria(${m.id})">🗑️ Eliminar</button>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     } catch (err) {
         cont.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
     }
 }
 
-// 4. Crear nueva materia
+// 🆕 FUNCIÓN NUEVA: Ver qué grupos tiene una materia
+async function verGruposAsignadosAMateria(materiaId, materiaNombre) {
+    try {
+        const asignaciones = await api(`/api/materias/${materiaId}/asignaciones`);
+        const todosLosGrupos = await api('/api/grupos');
+        
+        if (!asignaciones || asignaciones.length === 0) {
+            toast('ℹ️ No hay grupos asignados a esta materia aún.');
+            return;
+        }
+
+        // Agrupar las asignaciones por descripción de horario
+        const porHorario = {};
+        asignaciones.forEach(a => {
+            if (!porHorario[a.horario_desc]) porHorario[a.horario_desc] = [];
+            const grupoEncontrado = todosLosGrupos.find(g => g.id === a.grupo_id);
+            const nombreGrupo = grupoEncontrado ? grupoEncontrado.nombre : 'Grupo desconocido';
+            porHorario[a.horario_desc].push(nombreGrupo);
+        });
+
+        let html = '';
+        for (const [horario, grupos] of Object.entries(porHorario)) {
+            html += `<h4 style="margin: 15px 0 5px 0; font-size: 15px; color: var(--primary, #007bff); border-bottom: 1px solid var(--border); padding-bottom: 5px;">🕒 ${horario}</h4>`;
+            html += `<ul style="margin: 0 0 15px 0; padding-left: 20px; color: var(--text, #333);">`;
+            grupos.forEach(g => html += `<li style="margin-bottom: 4px;">${g}</li>`);
+            html += `</ul>`;
+        }
+
+        openModal(`Grupos en: <strong>${materiaNombre}</strong>`, `
+            <div style="padding: 10px;">
+                ${html}
+            </div>
+            <div class="modal-actions" style="margin-top:20px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()" style="font-size:15px; padding:10px 20px;">Cerrar</button>
+            </div>
+        `);
+    } catch (err) {
+        toast('❌ Error: ' + err.message);
+    }
+}
+
+// 🆕 FUNCIÓN PARA EDITAR MATERIA
+async function editarMateria(id) {
+    try {
+        const materias = await api('/api/materias');
+        const m = materias.find(mat => mat.id === id);
+        if (!m) return;
+
+        const horariosTexto = m.horarios.map(h => h.descripcion).join('\n');
+
+        openModal(`Editar materia: <strong>${m.nombre}</strong>`, `
+            <form id="form-editar-materia">
+                <label style="font-size:15px; font-weight:600;">Nombre de la materia</label>
+                <input type="text" name="nombre" value="${m.nombre}" required style="font-size:15px; padding:10px; width:100%;">
+                
+                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Clave</label>
+                <input type="text" name="clave" value="${m.clave}" required style="font-size:15px; padding:10px; width:100%;">
+                
+                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Semestre</label>
+                <input type="text" name="semestre" value="${m.semestre}" required style="font-size:15px; padding:10px; width:100%;">
+                
+                <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Horarios (uno por línea)</label>
+                <textarea name="horarios" rows="3" style="font-size:15px; padding:10px; width:100%; font-family:inherit;">${horariosTexto}</textarea>
+                
+                <div class="modal-actions" style="margin-top:20px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()" style="font-size:15px; padding:10px 20px;">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" style="font-size:15px; padding:10px 20px;">Guardar Cambios</button>
+                </div>
+            </form>
+        `);
+
+        document.getElementById('form-editar-materia').onsubmit = async e => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const horariosArray = fd.get('horarios').split('\n').map(h => h.trim()).filter(h => h.length > 0);
+
+            try {
+                await api(`/api/materias/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        nombre: fd.get('nombre'),
+                        clave: fd.get('clave'),
+                        semestre: fd.get('semestre'),
+                        horarios: horariosArray
+                    }),
+                });
+                closeModal();
+                toast('✅ Materia actualizada correctamente');
+                cargarMaterias();
+                cargarMateriasSelects();
+            } catch (err) {
+                toast('❌ Error: ' + err.message);
+            }
+        };
+    } catch (err) {
+        toast('❌ Error al cargar datos: ' + err.message);
+    }
+}
+
+// ============ ASIGNAR GRUPOS A UNA MATERIA (CORREGIDO: USA MEMORIA LOCAL) ============
+async function asignarGruposAMateria(materiaId, materiaNombre) {
+    try {
+        // 🎯 CORRECCIÓN: Buscar la materia en el estado local en lugar de hacer un GET al backend
+        const materia = state.materias.find(m => m.id === parseInt(materiaId));
+        
+        if (!materia) {
+            toast('⚠️ Materia no encontrada. Por favor, recarga la página.');
+            return;
+        }
+
+        const todosLosGrupos = await api('/api/grupos');
+        const asignacionesActuales = await api(`/api/materias/${materiaId}/asignaciones`);
+        
+        if (!materia.horarios || materia.horarios.length === 0) {
+            toast('⚠️ Primero debes agregar al menos un horario a esta materia.');
+            return;
+        }
+
+        let htmlHorarios = '';
+        materia.horarios.forEach(horario => {
+            htmlHorarios += `<h4 style="margin: 20px 0 10px 0; font-size: 16px; color: var(--primary, #007bff); border-bottom: 2px solid var(--border); padding-bottom: 5px;">🕒 ${horario.descripcion}</h4>`;
+            
+            const opcionesGrupo = (todosLosGrupos || []).map(g => {
+                const estaAsignado = (asignacionesActuales || []).some(a => a.grupo_id === g.id && a.horario_materia_id === horario.id);
+                const isChecked = estaAsignado ? 'checked' : '';
+                
+                return `
+                <label style="
+                    display: flex; align-items: center; gap: 15px; padding: 12px 15px; margin: 8px 0; 
+                    background: var(--bg-soft, #f8f9fa); border: 2px solid var(--border, #e0e0e0); 
+                    border-radius: 8px; cursor: pointer; transition: all 0.2s ease; font-size: 16px;
+                " onmouseover="this.style.borderColor='var(--primary, #007bff)'; this.style.background='var(--primary-light, #e3f2fd)'" 
+                   onmouseout="this.style.borderColor='var(--border, #e0e0e0)'; this.style.background='var(--bg-soft, #f8f9fa)'">
+                    <input type="checkbox" class="check-asignacion-grupo" data-grupo="${g.id}" data-horario="${horario.id}" ${isChecked} style="
+                        width: 20px; height: 20px; cursor: pointer; accent-color: var(--primary, #007bff); flex-shrink: 0;
+                    "> 
+                    <span>${g.nombre}</span>
+                </label>`;
+            }).join('');
+            
+            htmlHorarios += opcionesGrupo || '<p style="color:var(--text-soft); font-size:14px; padding:10px;">No hay grupos creados.</p>';
+        });
+
+        openModal(`Asignar grupos a: <strong>${materiaNombre}</strong>`, `
+            <div class="info-box" style="font-size:15px; margin-bottom:15px;">
+                Selecciona qué grupo toma la materia en cada horario específico.
+            </div>
+            <form id="form-asignar-grupos-a-materia">
+                <div style="max-height: 400px; overflow-y: auto; padding: 5px 10px;">
+                    ${htmlHorarios}
+                </div>
+                <div class="modal-actions" style="margin-top:20px; display:flex; gap:10px; justify-content:flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()" style="font-size:15px; padding:10px 20px;">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" style="font-size:15px; padding:10px 20px;">Guardar Asignaciones</button>
+                </div>
+            </form>
+        `);
+
+        document.getElementById('form-asignar-grupos-a-materia').onsubmit = async e => {
+            e.preventDefault();
+            const checkboxes = document.querySelectorAll('.check-asignacion-grupo:checked');
+            const asignaciones = Array.from(checkboxes).map(cb => ({
+                grupo_id: parseInt(cb.dataset.grupo),
+                horario_materia_id: parseInt(cb.dataset.horario)
+            }));
+            
+            toast('⏳ Guardando asignaciones...');
+            try {
+                await api(`/api/materias/${materiaId}/asignaciones`, {
+                    method: 'POST',
+                    body: JSON.stringify({ asignaciones })
+                });
+                closeModal();
+                toast('✅ Asignaciones guardadas correctamente');
+                actualizarInfoGrupoActiva();
+            } catch (err) {
+                toast('❌ Error: ' + err.message);
+            }
+        };
+    } catch (err) {
+        toast('❌ Error al cargar datos: ' + err.message);
+    }
+}
+
+// 4. Eliminar materia (CORREGIDO Y FUNCIONAL)
+async function eliminarMateria(id) {
+    if (!confirm('¿Eliminar esta materia? \n\nLos grupos y alumnos NO se eliminarán, solo se desvincularán de esta materia.')) return;
+    try {
+        await api(`/api/materias/${id}`, { method: 'DELETE' });
+        toast('✅ Materia eliminada correctamente');
+        cargarMaterias();
+        cargarMateriasSelects();
+    } catch (err) {
+        toast('❌ Error: ' + err.message);
+    }
+}
+
+// 5. Crear nueva materia (CON SOPORTE PARA MÚLTIPLES HORARIOS)
 document.getElementById('btn-nueva-materia').addEventListener('click', () => {
     openModal('Nueva materia', `
         <form id="form-nueva-materia">
-            <label>Nombre</label>
-            <input type="text" name="nombre" required>
-            <label>Clave (única)</label>
-            <input type="text" name="clave" required placeholder="Ej: BIOQ-101">
-            <label>Semestre</label>
-            <input type="text" name="semestre" required placeholder="Ej: 2026-2">
-            <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                <button type="submit" class="btn btn-primary">Crear</button>
+            <label style="font-size:15px; font-weight:600;">Nombre de la materia</label>
+            <input type="text" name="nombre" required style="font-size:15px; padding:10px;">
+            
+            <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Clave (única)</label>
+            <input type="text" name="clave" required placeholder="Ej: BIOQ-101" style="font-size:15px; padding:10px;">
+            
+            <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Semestre</label>
+            <input type="text" name="semestre" required placeholder="Ej: 2026-2" style="font-size:15px; padding:10px;">
+            
+            <label style="font-size:15px; font-weight:600; margin-top:12px; display:block;">Horarios (uno por línea, opcional)</label>
+            <textarea name="horarios" rows="3" placeholder="Ej:&#10;Lunes y Miércoles 10:00 - 12:00&#10;Martes y Jueves 16:00 - 18:00" style="font-size:15px; padding:10px; font-family:inherit;"></textarea>
+            
+            <div class="modal-actions" style="margin-top:20px;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()" style="font-size:15px; padding:10px 20px;">Cancelar</button>
+                <button type="submit" class="btn btn-primary" style="font-size:15px; padding:10px 20px;">Crear Materia</button>
             </div>
         </form>
     `);
+    
     document.getElementById('form-nueva-materia').onsubmit = async e => {
         e.preventDefault();
         const fd = new FormData(e.target);
+        
+        const horariosArray = fd.get('horarios')
+            .split('\n')
+            .map(h => h.trim())
+            .filter(h => h.length > 0);
+
         try {
             await api('/api/materias', {
                 method: 'POST',
@@ -327,88 +550,19 @@ document.getElementById('btn-nueva-materia').addEventListener('click', () => {
                     nombre: fd.get('nombre'),
                     clave: fd.get('clave'),
                     semestre: fd.get('semestre'),
+                    horarios: horariosArray
                 }),
             });
             closeModal();
-            toast('Materia creada');
+            toast('✅ Materia y horarios creados exitosamente');
             cargarMaterias();
             cargarMateriasSelects();
         } catch (err) {
-            toast('Error: ' + err.message);
+            toast('❌ Error: ' + err.message);
         }
     };
 });
 
-async function eliminarMateria(id) {
-    if (!confirm('¿Eliminar esta materia? (Los grupos y alumnos NO se eliminarán)')) return;
-    try {
-        await api(`/api/materias/${id}`, { method: 'DELETE' });
-        toast('Materia eliminada');
-        cargarMaterias();
-        cargarMateriasSelects();
-    } catch (err) {
-        toast('Error: ' + err.message);
-    }
-}
-
-// 5. Asignar grupos a una materia
-async function asignarGruposAMateria(materiaId, materiaNombre) {
-    try {
-        // Obtener todos los grupos
-        const todosLosGrupos = await api('/api/grupos');
-        // Obtener los grupos ya asignados a esta materia
-        const gruposAsignados = await api(`/api/grupos/materia/${materiaId}`);
-        const idsAsignados = new Set(gruposAsignados.map(g => g.id));
-
-        const opciones = todosLosGrupos.map(g => {
-            const isChecked = idsAsignados.has(g.id) ? 'checked' : '';
-            return `<label style="display:flex; align-items:center; gap:8px; margin:8px 0; font-weight:normal; text-transform:none;">
-                <input type="checkbox" name="grupos" value="${g.id}" ${isChecked}> ${g.nombre}
-            </label>`;
-        }).join('');
-
-        openModal(`Asignar grupos a: ${materiaNombre}`, `
-            <div class="info-box">Selecciona los grupos que tomarán esta materia.</div>
-            <form id="form-asignar-grupos">
-                <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 8px;">
-                    ${opciones || '<p style="color:var(--text-soft)">No hay grupos creados aún.</p>'}
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Guardar Asignaciones</button>
-                </div>
-            </form>
-        `);
-
-        document.getElementById('form-asignar-grupos').onsubmit = async e => {
-            e.preventDefault();
-            const fd = new FormData(e.target);
-            const gruposSeleccionados = fd.getAll('grupos').map(Number);
-            
-            toast('⏳ Actualizando asignaciones...');
-            try {
-                // Por simplicidad, quitamos todas y agregamos las seleccionadas
-                // (En una app más grande se haría un diff, pero esto es rápido y efectivo)
-                for (const g of gruposAsignados) {
-                    await api(`/api/grupos/${g.id}/materias/${materiaId}`, { method: 'DELETE' }).catch(() => {});
-                }
-                for (const gId of gruposSeleccionados) {
-                    await api(`/api/grupos/${gId}/materias`, {
-                        method: 'POST',
-                        body: JSON.stringify({ materia_id: materiaId })
-                    }).catch(() => {});
-                }
-                closeModal();
-                toast('✅ Asignaciones actualizadas');
-                actualizarInfoGrupoActiva(); // Refrescar si está en tomar lista
-            } catch (err) {
-                toast('Error: ' + err.message);
-            }
-        };
-    } catch (err) {
-        toast('Error al cargar grupos: ' + err.message);
-    }
-}
 
 // 6. Listar todos los grupos (Vista Grupos - Formato Horizontal, SIN HORARIO)
 async function cargarVistaGrupos() {
@@ -440,6 +594,19 @@ async function cargarVistaGrupos() {
         }
     } catch (err) {
         cont.innerHTML = `<p class="alert alert-error">${err.message}</p>`;
+    }
+}
+
+// ============ ELIMINAR GRUPO ============
+async function eliminarGrupo(id) {
+    if (!confirm('¿Eliminar este grupo y a TODOS sus alumnos? \n\nEsta acción no se puede deshacer.')) return;
+    
+    try {
+        await api(`/api/grupos/${id}`, { method: 'DELETE' });
+        toast('✅ Grupo eliminado correctamente');
+        cargarVistaGrupos(); // Recargar la lista para que desaparezca de la pantalla
+    } catch (err) {
+        toast('❌ Error al eliminar: ' + err.message);
     }
 }
 
@@ -518,11 +685,20 @@ function renderizarContenidoDetalle(grupoId, grupo) {
         a.nombre_completo.localeCompare(b.nombre_completo, 'es', { sensitivity: 'base' })
     );
 
-    // 2. Renderizar Materias (1/3 del ancho)
+    // 2. Renderizar Materias (1/3 del ancho) CON DISTINCIÓN DE HORARIO
     let materiasHtml = '<p style="color:var(--text-soft); font-size:13px;">Sin materias asignadas.</p>';
-    if (grupo.materias && grupo.materias.length > 0) {
+    
+    // Usamos el nuevo campo detallado. Si no existe, usamos el antiguo como fallback
+    const listaDetallada = grupo.materias_con_horario || []; 
+    
+    if (listaDetallada.length > 0) {
         materiasHtml = `<div style="display:flex; flex-direction:column; gap:8px;">` + 
-            grupo.materias.map(m => `<span style="background:var(--bg-soft); padding:6px 10px; border-radius:8px; font-size:13px; border:1px solid var(--border);">📚 ${m.nombre} <small>(${m.clave})</small></span>`).join('') + 
+            listaDetallada.map(m => `
+                <span style="background:var(--bg-soft); padding:8px 10px; border-radius:8px; font-size:13px; border:1px solid var(--border); line-height: 1.4;">
+                    📚 <strong>${m.materia_nombre}</strong> <small>(${m.materia_clave})</small><br>
+                    🕒 <span style="color:var(--primary, #007bff); font-weight:600;">${m.horario_descripcion}</span>
+                </span>
+            `).join('') + 
             `</div>`;
     }
 
@@ -578,8 +754,6 @@ function nuevoAlumno(grupoId) {
             <input type="text" name="matricula" required>
             <label>Nombre completo</label>
             <input type="text" name="nombre_completo" required>
-            <label>Email (opcional)</label>
-            <input type="email" name="email">
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
                 <button type="submit" class="btn btn-primary">Crear</button>
@@ -676,60 +850,82 @@ async function eliminarAlumno(id, grupoId) {
     }
 }
 
-// Función para asignar materias (sigue usando modal para el formulario, pero el resultado se ve en línea)
+// ============ ASIGNAR MATERIAS A UN GRUPO (CORREGIDO Y BLINDADO) ============
 async function asignarMateriasAGrupo(grupoId, nombreGrupo) {
     try {
         const materias = await api('/api/materias');
         const grupo = await api(`/api/grupos/${grupoId}`);
-        const idsAsignadas = new Set(grupo.materias.map(m => m.id));
+        
+        // 🎯 BLINDAJE: Usar || [] para evitar el error "Cannot read properties of undefined"
+        const horariosAsignados = new Set(grupo.horarios_asignados || []);
 
-        const opciones = materias.map(m => {
-            const isChecked = idsAsignadas.has(m.id) ? 'checked' : '';
-            return `<label style="display:flex; align-items:center; gap:8px; margin:8px 0; font-weight:normal; text-transform:none;">
-                <input type="checkbox" name="materias" value="${m.id}" ${isChecked}> ${m.nombre} (${m.clave})
-            </label>`;
-        }).join('');
+        let htmlHorarios = '';
+        for (const m of (materias || [])) {
+            if (!m.horarios || m.horarios.length === 0) continue;
+            
+            htmlHorarios += `<h4 style="margin: 20px 0 10px 0; font-size: 16px; color: var(--primary, #007bff); border-bottom: 2px solid var(--border); padding-bottom: 5px;">📚 ${m.nombre} (${m.clave})</h4>`;
+            
+            const opcionesHorario = (m.horarios || []).map(h => {
+                const isChecked = horariosAsignados.has(h.id) ? 'checked' : '';
+                
+                return `
+                <label style="
+                    display: flex; align-items: center; gap: 15px; padding: 12px 15px; margin: 8px 0; 
+                    background: var(--bg-soft, #f8f9fa); border: 2px solid var(--border, #e0e0e0); 
+                    border-radius: 8px; cursor: pointer; transition: all 0.2s ease; font-size: 16px;
+                " onmouseover="this.style.borderColor='var(--primary, #007bff)'; this.style.background='var(--primary-light, #e3f2fd)'" 
+                   onmouseout="this.style.borderColor='var(--border, #e0e0e0)'; this.style.background='var(--bg-soft, #f8f9fa)'">
+                    <input type="checkbox" class="check-asignacion-materia" data-grupo="${grupoId}" data-horario="${h.id}" ${isChecked} style="
+                        width: 20px; height: 20px; cursor: pointer; accent-color: var(--primary, #007bff); flex-shrink: 0;
+                    "> 
+                    <span>🕒 ${h.descripcion}</span>
+                </label>`;
+            }).join('');
+            
+            htmlHorarios += opcionesHorario || '<p style="color:var(--text-soft); font-size:14px; padding:10px;">Sin horarios definidos.</p>';
+        }
 
-        openModal('Asignar materias a: ' + nombreGrupo, `
-            <form id="form-asignar-materias-grupo">
-                <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); padding: 10px; border-radius: 8px;">
-                    ${opciones || '<p style="color:var(--text-soft)">No hay materias creadas.</p>'}
+        openModal(`Asignar materias a: <strong>${nombreGrupo}</strong>`, `
+            <div class="info-box" style="font-size:15px; margin-bottom:15px;">
+                Selecciona en qué horario de cada materia participará este grupo.
+            </div>
+            <form id="form-asignar-materias-a-grupo">
+                <div style="max-height: 400px; overflow-y: auto; padding: 5px 10px;">
+                    ${htmlHorarios || '<p style="color:var(--text-soft); font-size:15px; padding:20px; text-align:center;">No hay materias con horarios.</p>'}
                 </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Guardar</button>
+                <div class="modal-actions" style="margin-top:20px; display:flex; gap:10px; justify-content:flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()" style="font-size:15px; padding:10px 20px;">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" style="font-size:15px; padding:10px 20px;">Guardar Asignaciones</button>
                 </div>
             </form>
         `);
 
-        document.getElementById('form-asignar-materias-grupo').onsubmit = async e => {
+        document.getElementById('form-asignar-materias-a-grupo').onsubmit = async e => {
             e.preventDefault();
-            const fd = new FormData(e.target);
-            const materiasSeleccionadas = fd.getAll('materias').map(Number);
+            const checkboxes = document.querySelectorAll('.check-asignacion-materia');
             
-            toast('⏳ Actualizando...');
+            toast('⏳ Guardando asignaciones...');
             try {
-                for (const m of grupo.materias) {
-                    await api(`/api/grupos/${grupoId}/materias/${m.id}`, { method: 'DELETE' }).catch(() => {});
+                for (const cb of checkboxes) {
+                    const horarioId = parseInt(cb.dataset.horario);
+                    if (cb.checked) {
+                        await api(`/api/grupos/${grupoId}/asignar-horario?horario_materia_id=${horarioId}`, { method: 'POST' }).catch(() => {});
+                    } else {
+                        await api(`/api/grupos/${grupoId}/asignar-horario/${horarioId}`, { method: 'DELETE' }).catch(() => {});
+                    }
                 }
-                for (const mId of materiasSeleccionadas) {
-                    await api(`/api/grupos/${grupoId}/materias`, {
-                        method: 'POST',
-                        body: JSON.stringify({ materia_id: mId })
-                    }).catch(() => {});
-                }
-                closeModal();
-                toast('✅ Asignaciones actualizadas');
                 
-                // Refrescar la vista en línea inmediatamente
+                closeModal();
+                toast('✅ Asignaciones guardadas correctamente');
+                
                 const grupoActualizado = await api(`/api/grupos/${grupoId}`);
                 renderizarContenidoDetalle(grupoId, grupoActualizado);
             } catch (err) {
-                toast('Error: ' + err.message);
+                toast('❌ Error: ' + err.message);
             }
         };
     } catch (err) {
-        toast('Error: ' + err.message);
+        toast('❌ Error al cargar materias: ' + err.message);
     }
 }
 

@@ -3,6 +3,16 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 
+class HorarioMateria(Base):
+    __tablename__ = "horarios_materia"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    materia_id = Column(Integer, ForeignKey("materias.id", ondelete="CASCADE"), nullable=False)
+    descripcion = Column(String, nullable=False)
+    
+    materia = relationship("Materia", back_populates="horarios")
+    grupos = relationship("Grupo", secondary="asignaciones_grupo_horario", back_populates="materias_asignadas")
+
 
 class Materia(Base):
     __tablename__ = "materias"
@@ -16,10 +26,4 @@ class Materia(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     profesor = relationship("User", backref="materias")
-    
-    # Relación N:M con grupos (a través de grupos_materias)
-    grupos = relationship(
-        "Grupo",
-        secondary="grupos_materias",
-        back_populates="materias"
-    )
+    horarios = relationship("HorarioMateria", back_populates="materia", cascade="all, delete-orphan")

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.grupo import Grupo
+from app.models.materia import HorarioMateria
 from app.models.alumno import Alumno
 from app.schemas.alumno import AlumnoCreate, AlumnoOut
 
@@ -14,9 +15,13 @@ def _verificar_grupo(db: Session, grupo_id: int, user: User) -> Grupo:
     """
     Verifica que el grupo exista y que el usuario tenga permiso.
     En el nuevo modelo, un profesor tiene permiso si el grupo tiene 
-    asignada ALGUNA de sus materias.
+    asignada ALGUNA de sus materias, o si el grupo aún no tiene materias (para permitir configuración inicial).
     """
-    g = db.query(Grupo).filter(Grupo.id == grupo_id).first()
+    # Cargamos el grupo con sus materias_asignadas para la validación
+    g = db.query(Grupo).options(
+        joinedload(Grupo.materias_asignadas).joinedload(HorarioMateria.materia)
+    ).filter(Grupo.id == grupo_id).first()
+    
     if not g:
         raise HTTPException(404, "Grupo no encontrado")
     
@@ -24,10 +29,13 @@ def _verificar_grupo(db: Session, grupo_id: int, user: User) -> Grupo:
     if user.role == "admin":
         return g
         
-    # Si es profesor, verificamos si el grupo tiene asignada alguna materia de este profesor
-    tiene_permiso = any(m.profesor_id == user.id for m in g.materias)
-    if not tiene_permiso:
-        raise HTTPException(403, "No autorizado: Este grupo no tiene asignada ninguna de tus materias")
+    # 🎯 LÓGICA DE PERMISOS CORREGIDA:
+    if g.materias_asignadas:
+        # Si YA tiene materias, verificamos que al menos una sea del profesor
+        tiene_permiso = any(h.materia.profesor_id == user.id for h in g.materias_asignadas)
+        if not tiene_permiso:
+            raise HTTPException(403, "No autorizado: Este grupo no tiene materias asignadas a ti.")
+    # Si NO tiene materias aún, permitimos el acceso para que el profesor pueda agregar alumnos y asignar materias.
         
     return g
 
@@ -76,7 +84,7 @@ def crear_alumnos_masivo(
     creados = []
     for payload in alumnos:
         if db.query(Alumno).filter(Alumno.matricula == payload.matricula).first():
-            continue # Saltar si ya existe, o podrías lanzar error
+            continue # Saltar si ya existe para no fallar todo el lote
         a = Alumno(**payload.model_dump())
         db.add(a)
         creados.append(a)

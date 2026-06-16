@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.grupo import Grupo
+from app.models.materia import HorarioMateria
 from app.models.alumno import Alumno
 from app.services.qr_service import generar_qr_imagen, generar_zip_qrs
 
@@ -24,15 +25,21 @@ def qr_individual(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    a = db.query(Alumno).filter(Alumno.id == alumno_id).first()
+    # 🎯 Cargamos el alumno y su grupo con las materias_asignadas para validar permisos
+    a = db.query(Alumno).options(
+        joinedload(Alumno.grupo).joinedload(Grupo.materias_asignadas).joinedload(HorarioMateria.materia)
+    ).filter(Alumno.id == alumno_id).first()
+    
     if not a:
         raise HTTPException(404, "Alumno no encontrado")
     
-    # 🔄 NUEVA LÓGICA N:M: Verificar si el usuario tiene permiso sobre alguna materia del grupo
+    # 🎯 LÓGICA DE PERMISOS CORREGIDA:
     if user.role != "admin":
-        tiene_permiso = any(m.profesor_id == user.id for m in a.grupo.materias)
-        if not tiene_permiso:
-            raise HTTPException(403, "No autorizado para ver este QR")
+        if a.grupo.materias_asignadas:
+            tiene_permiso = any(h.materia.profesor_id == user.id for h in a.grupo.materias_asignadas)
+            if not tiene_permiso:
+                raise HTTPException(403, "No autorizado para ver este QR")
+        # Si el grupo no tiene materias aún, permitimos ver el QR (configuración inicial)
     
     img = generar_qr_imagen(contenido_qr=a.qr_token, texto_inferior=a.nombre_completo)
     return StreamingResponse(
@@ -48,20 +55,21 @@ def qr_zip_grupo(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # 🔄 IMPORTANTE: Cargar 'materias' para la validación de permisos
+    # 🎯 Cargamos el grupo con alumnos y materias_asignadas
     g = db.query(Grupo).options(
         joinedload(Grupo.alumnos),
-        joinedload(Grupo.materias)
+        joinedload(Grupo.materias_asignadas).joinedload(HorarioMateria.materia)
     ).filter(Grupo.id == grupo_id).first()
     
     if not g:
         raise HTTPException(404, "Grupo no encontrado")
     
-    # 🔄 NUEVA LÓGICA N:M: Verificar permisos
+    # 🎯 LÓGICA DE PERMISOS CORREGIDA:
     if user.role != "admin":
-        tiene_permiso = any(m.profesor_id == user.id for m in g.materias)
-        if not tiene_permiso:
-            raise HTTPException(403, "No autorizado para este grupo")
+        if g.materias_asignadas:
+            tiene_permiso = any(h.materia.profesor_id == user.id for h in g.materias_asignadas)
+            if not tiene_permiso:
+                raise HTTPException(403, "No autorizado para este grupo")
     
     alumnos = [
         {
@@ -72,7 +80,8 @@ def qr_zip_grupo(
         for a in g.alumnos
     ]
     
-    materia_nombre = sanitizar_nombre_archivo(g.materias[0].nombre) if g.materias else "Materia"
+    # Usamos el nombre de la primera materia asignada para el nombre del archivo, o "Grupo" si no hay materias
+    materia_nombre = sanitizar_nombre_archivo(g.materias_asignadas[0].materia.nombre) if g.materias_asignadas else "Grupo"
     grupo_nombre = sanitizar_nombre_archivo(g.nombre)
     filename = f"qrs_{materia_nombre}_{grupo_nombre}.zip"
     
